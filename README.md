@@ -115,7 +115,8 @@ Install the app using one of the following methods:
 1. Run:
 ```bash
 brew install --cask betterdisplay
-```   
+```
+
 ## Using the App
 
 The app contains detailed explanations for most features (under `Settings` - click the gear icon at the bottom of the app menu). Check out the [Wiki section](https://github.com/waydabber/BetterDisplay/wiki) for more info on app usage.
