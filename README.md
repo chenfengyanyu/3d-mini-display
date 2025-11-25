@@ -16,15 +16,6 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 <br />
 
 <div align="center">
-<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/downloads/waydabber/BetterDisplay/total.svg?style=flat&color=blue" alt="downloads"/></a>
-<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/release/waydabber/BetterDisplay.svg?style=flat&color=blue&include_prereleases" alt="latest version"/></a>
-<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=flat&color=blue" alt="platform"/></a>
-<a href="https://discord.gg/aKe5yCWXSp"><img src="https://img.shields.io/discord/903276571773771796?label=chat&style=flat&color=blue&logo=discord" alt="platform"/></a>
-</div>
-
-<br />
-
-<div align="center">
 <table align="center"><tr><td align="center">
 <b>🎁 Black Friday <b>33%-off</b> Pro License Coupon: <code>BFCM2025</code> 🎁</b><br/>
 <sub>
@@ -32,6 +23,17 @@ Starts <b>Thursday Nov 27</b> (1 AM San Francisco • 4 AM New York • 9 AM Lon
 </sub>
 </td></tr></table>
 </div>
+
+<br />
+
+<div align="center">
+<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/downloads/waydabber/BetterDisplay/total.svg?style=flat&color=blue" alt="downloads"/></a>
+<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/release/waydabber/BetterDisplay.svg?style=flat&color=blue&include_prereleases" alt="latest version"/></a>
+<a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=flat&color=blue" alt="platform"/></a>
+<a href="https://discord.gg/aKe5yCWXSp"><img src="https://img.shields.io/discord/903276571773771796?label=chat&style=flat&color=blue&logo=discord" alt="platform"/></a>
+</div>
+
+<br />
 
 ## About BetterDisplay
 
