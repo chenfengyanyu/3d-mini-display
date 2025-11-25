@@ -22,6 +22,17 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 <a href="https://discord.gg/aKe5yCWXSp"><img src="https://img.shields.io/discord/903276571773771796?label=chat&style=flat&color=blue&logo=discord" alt="platform"/></a>
 </div>
 
+<br />
+
+<div align="center">
+<table align="center"><tr><td align="center">
+<b>🎁 Black Friday <b>33%-off</b> Pro License Coupon: <code>BFCM2025</code> 🎁</b><br/>
+<sub>
+Starts <b>Thursday Nov 27</b> (1 AM San Francisco • 4 AM New York • 9 AM London • 10 AM CET • 7 PM Sydney). Ends Dec 1.
+</sub>
+</td></tr></table>
+</div>
+
 ## About BetterDisplay
 
 **BetterDisplay** is a truly wonderful tool! It lets you convert your displays to **fully scalable screens**, manage **display configuration overrides**, allows **brightness and color control**, provides **XDR/HDR brightness upscaling** (extra brightness beyond 100% for compatible XDR or HDR displays on Apple Silicon and Intel Macs - multiple methods available), **full dimming** to black, helps you **create and manage virtual screens** for your Mac, create **Picture in Picture** windows of your displays and gives you a host of other features to **manage your display's settings** like display and color mode easily from the menu bar. It can even **disconnect/reconnect displays** on-the-fly!
