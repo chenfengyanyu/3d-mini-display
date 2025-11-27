@@ -17,9 +17,9 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 
 <div align="center">
 <table align="center"><tr><td align="center">
-<b>🎁 Black Friday <b>33%-off</b> Pro License Coupon: <code>BFCM2025</code> 🎁</b><br/>
+<b>🎉 Black Friday Sale LIVE - <b>33%-off</b> with code: <code>BFCM2025</code></b><br/>
 <sub>
-Starts <b>Thursday Nov 27</b> (1 AM San Francisco • 4 AM New York • 9 AM London • 10 AM CET • 7 PM Sydney). Ends Dec 1.
+Ends Dec 1 midnight • Don’t miss out!
 </sub>
 </td></tr></table>
 </div>
