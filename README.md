@@ -19,7 +19,7 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 <table align="center"><tr><td align="center">
 <b>🎉 Cyber Monday Sale LIVE - <b>33%-off</b> with code: <code>BFCM2025</code></b><br/>
 <sub>
-Ends Today • Don’t miss out!
+Ends Soon • Don’t miss out!
 </sub>
 </td></tr></table>
 </div>
