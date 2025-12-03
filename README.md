@@ -16,17 +16,6 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 <br />
 
 <div align="center">
-<table align="center"><tr><td align="center">
-<b>🎉 Cyber Monday Sale LIVE - <b>33%-off</b> with code: <code>BFCM2025</code></b><br/>
-<sub>
-Ends Soon • Don’t miss out!
-</sub>
-</td></tr></table>
-</div>
-
-<br />
-
-<div align="center">
 <a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/downloads/waydabber/BetterDisplay/total.svg?style=flat&color=blue" alt="downloads"/></a>
 <a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/github/release/waydabber/BetterDisplay.svg?style=flat&color=blue&include_prereleases" alt="latest version"/></a>
 <a href="https://github.com/waydabber/BetterDisplay/releases"><img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg?style=flat&color=blue" alt="platform"/></a>
