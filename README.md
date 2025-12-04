@@ -3,9 +3,9 @@
 
 <h2>BetterDisplay Pro</h2>
 <p>Custom Resolutions, XDR/HDR Extra Brightness, Virtual Screens, Picture in Picture, Soft-Disconnect, Configuration and EDID overrides, DDC Control, Color Mode Selection, Syncing, Layout Protection and More!</p>
-<a href="https://github.com/waydabber/BetterDisplay/releases/download/v4.0.4/BetterDisplay-v4.0.4.dmg"><img src="https://user-images.githubusercontent.com/37590873/219133640-8b7a0179-20a7-4e02-8887-fbbd2eaad64b.png" width="180" alt="Download for macOS"/></a><br/>
+<a href="https://github.com/waydabber/BetterDisplay/releases/download/v4.1.1/BetterDisplay-v4.1.1.dmg"><img src="https://user-images.githubusercontent.com/37590873/219133640-8b7a0179-20a7-4e02-8887-fbbd2eaad64b.png" width="180" alt="Download for macOS"/></a><br/>
 <sub>
-<b>Download the <a href="https://github.com/waydabber/BetterDisplay/releases/download/v4.0.4/BetterDisplay-v4.0.4.dmg">current v4.x release</a> for macOS Tahoe 26, Ventura, Sonoma, Sequoia</b><br>
+<b>Download the <a href="https://github.com/waydabber/BetterDisplay/releases/download/v4.1.1/BetterDisplay-v4.1.1.dmg">current v4.x release</a> for macOS Tahoe 26, Ventura, Sonoma, Sequoia</b><br>
 Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/download/v3.5.6/BetterDisplay-v3.5.6b.dmg">v3.5.6</a> |
 <a href="https://github.com/waydabber/BetterDisplay/releases/download/v2.3.9/BetterDisplay-v2.3.9.dmg">v2.3.9</a> - macOS Monterey |
 <a href="https://github.com/waydabber/BetterDisplay/releases/download/v1.4.15/BetterDisplay-v1.4.15.dmg">v1.4.15</a> - Mojave, Catalina, Big Sur<br />
@@ -34,7 +34,8 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 
 ## Key Features
 
-- **NEW:** Built-in LG webOS TV, Samsung Tizen TV, Philips Android TV and Yamaha AVR control support (available in the [v4.1.0 pre-release](https://github.com/waydabber/BetterDisplay/releases)).
+- **NEW:** Built-in LG webOS TV, Samsung Tizen TV, Philips Android TV and Yamaha AVR networked control support.
+- (https://github.com/waydabber/BetterDisplay/releases)).
 - [Reach the full brightness potential of your XDR or HDR display](https://github.com/waydabber/BetterDisplay/wiki/XDR-and-HDR-brightness-upscaling) - XDR brightness upscale to 1600 nits, external HDR display brightness upscale depending on the display's capability. Native XDR, color table (Apple Silicon) and Metal (Apple Silicon and Intel) methods are all supported. *
 - [Native brightness upscaling for Apple XDR displays](https://github.com/waydabber/BetterDisplay/wiki/XDR-and-HDR-brightness-upscaling#enablingdisabling-hardware-native-xdr-upscaling-apple-silicon-intel-requires-apple-xdr-display) (built-in) - provides full unlock for the entire brightness range with no strings attached - no clipped or overblown HDR videos, full native sliders compatibility, no extra CPU/GPU usage. *
 - Color mode selector and unexposed refresh rates for Apple Silicon Macs** - change RGB, YCbCr, chroma subsampling, HDMI range settings.
