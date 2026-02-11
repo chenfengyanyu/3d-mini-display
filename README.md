@@ -129,9 +129,6 @@ If you have any questions, search for answers under [Discussions](https://github
 
 ## Compatibility
 
-> [!NOTE]
-> macOS **Tahoe 26.3 RC1 (25D122)** introduced an issue that affects some app features (interaction with the OSD, PIP window resizing and PIP/stream crop definition window resizing - #5077, #5078, #5079). **An updated internal pre-release (enable under app Settings > Application > Updates) is available with appropriate workarounds** until an updated RC is provided by Apple._
-
 - The current v4.x version of the app is compatible with all **Apple Silicon** and **Intel** Macs running **macOS Tahoe 26**, **Sequoia**, **Sonoma** and **Ventura** (13.2 or newer).
 - The v3.5.6 version of the app supports **macOS Sequoia**, **Sonoma** and **Ventura** (13.2 or newer).
 - The latest stable v2.3.9 version of the app supports **macOS Sonoma**, **Ventura** and **Monterey** (12.4 or newer).
