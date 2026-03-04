@@ -77,7 +77,6 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 - Advanced keyboard shortcuts support. *
 - [Various CLI and app integration features](https://github.com/waydabber/BetterDisplay/wiki/Integration-features,-CLI) (command line, [betterdisplaycli](https://github.com/waydabber/betterdisplaycli), custom URL schema, HTTP, notifications).
 - MacOS Shortcuts (App Intents) support for various operations.
-- [MediaMate](https://wouter01.github.io/MediaMate/) support for OSDs with fresh visuals (latest versions required for both apps). *
 
 ... [and more is coming](https://github.com/waydabber/BetterDisplay/issues?q=is%3Aissue+is%3Aopen+sort%3Aupdated-desc+label%3Aenhancement)! :)
 
@@ -138,6 +137,16 @@ If you have any questions, search for answers under [Discussions](https://github
 - Maximum flexible scaling resolutions depend on GPU capabilities and the display's resolution (horizontal width limit is 6144 pixels for entry level Apple Silicon Macs, 7680 pixels for the Pro/Max/Ultra versions).
 - External display hardware backlight control and volume control require DDC capable, natively connected display or an Apple display. Some docks and dongles may not support DDC. All built-in ports of all Macs that can run the app are supported for DDC communication.
 - The app is compatible with headless Macs to create custom virtual screen resolutions for remote access.
+
+### Third party notch app integration support
+
+The following third party notch apps support BetterDisplay using its [OSD integration API](https://github.com/waydabber/BetterDisplay/wiki/Integration-features,-CLI#osd-notification-dispatch-integration):
+
+- [MediaMate](https://wouter01.github.io/MediaMate/) - support available
+- [DynamicLake](https://www.dynamiclake.com) - support available
+- [Alcove](https://tryalcove.com) - support available
+- [BoringNotch](https://theboring.name) - support [work in progress](https://github.com/TheBoredTeam/boring.notch/issues/943)
+- [Atoll](https://getatoll.app) - support [work in progress](https://github.com/Ebullioscopic/Atoll/issues/147)
 
 ## Localization
 
