@@ -145,8 +145,8 @@ The following third party notch apps support BetterDisplay using its [OSD integr
 - [MediaMate](https://wouter01.github.io/MediaMate/) - support available
 - [DynamicLake](https://www.dynamiclake.com) - support available
 - [Alcove](https://tryalcove.com) - support available
+- [Atoll](https://getatoll.app) - support available
 - [BoringNotch](https://theboring.name) - support [work in progress](https://github.com/TheBoredTeam/boring.notch/issues/943)
-- [Atoll](https://getatoll.app) - support [work in progress](https://github.com/Ebullioscopic/Atoll/issues/147)
 
 ## Localization
 
