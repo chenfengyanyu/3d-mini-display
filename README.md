@@ -35,7 +35,6 @@ Previous versions: <a href="https://github.com/waydabber/BetterDisplay/releases/
 ## Key Features
 
 - **NEW:** Built-in LG webOS TV, Samsung Tizen TV, Philips Android TV and Yamaha AVR networked control support.
-- (https://github.com/waydabber/BetterDisplay/releases)).
 - [Reach the full brightness potential of your XDR or HDR display](https://github.com/waydabber/BetterDisplay/wiki/XDR-and-HDR-brightness-upscaling) - XDR brightness upscale to 1600 nits, external HDR display brightness upscale depending on the display's capability. Color table (Apple Silicon) and Metal (Apple Silicon and Intel) methods are all supported. *
 - Color mode selector and unexposed refresh rates for Apple Silicon Macs** - change RGB, YCbCr, chroma subsampling, HDMI range settings.
 - Display group and synchronization features - sync brightness and other image controls among multiple displays!
