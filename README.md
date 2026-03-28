@@ -90,7 +90,7 @@ You can support development and unlock all features by **[purchasing a Pro licen
 With a Pro license, you’ll get full access to the current main version of the app (and all previous versions if needed for compatibility). Your purchase also includes at least one year of free updates — including any major upgrades released during that time. Best of all, the Pro license is perpetual (not a subscription), so the versions you unlock are yours to keep and use.
 
 <div align="center">
-<a href="https://betterdisplay.pro"><img width="500" src="https://github.com/waydabber/BetterDisplay/assets/37590873/6a732657-1e72-4b98-91e6-7a56abb716d3"></a>
+<a href="https://betterdisplay.pro/#buy"><img width="500" src="https://github.com/waydabber/BetterDisplay/assets/37590873/6a732657-1e72-4b98-91e6-7a56abb716d3"></a>
 </div>
 
 Please note that even if you don't buy the app, you can still use many of the features for free (if you are a non-business user). A 14-day trial is also available to fully evaluate BetterDisplay Pro before purchase.
