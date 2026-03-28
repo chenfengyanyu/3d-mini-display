@@ -85,12 +85,12 @@ _Note: features marked with an asterisk (*) require a [Pro license](https://gith
 
 ## Getting a Pro license to unlock all features
 
-You can support development and unlock all features of the app by **[purchasing a Pro license](https://betterdisplay.pro/buy)** ($21.99 / €19.99 — price, currency, and taxes may vary by country or state). You can also get Pro inside the app - just navigate to `Settings` (gear icon) > `Pro` and click on `Buy BetterDisplay Pro`.
+You can support development and unlock all features by **[purchasing a Pro license at betterdisplay.pro](https://betterdisplay.pro)**, the app's official site ($21.99 / €19.99 — price, currency, and taxes may vary by country or state). You can also get Pro inside the app - just navigate to `Settings` (gear icon) > `Pro` and click on `Buy BetterDisplay Pro`.
 
 With a Pro license, you’ll get full access to the current main version of the app (and all previous versions if needed for compatibility). Your purchase also includes at least one year of free updates — including any major upgrades released during that time. Best of all, the Pro license is perpetual (not a subscription), so the versions you unlock are yours to keep and use.
 
 <div align="center">
-<a href="https://betterdisplay.pro/buy"><img width="500" src="https://github.com/waydabber/BetterDisplay/assets/37590873/6a732657-1e72-4b98-91e6-7a56abb716d3"></a>
+<a href="https://betterdisplay.pro"><img width="500" src="https://github.com/waydabber/BetterDisplay/assets/37590873/6a732657-1e72-4b98-91e6-7a56abb716d3"></a>
 </div>
 
 Please note that even if you don't buy the app, you can still use many of the features for free (if you are a non-business user). A 14-day trial is also available to fully evaluate BetterDisplay Pro before purchase.
