@@ -149,7 +149,7 @@ The following third party notch apps support BetterDisplay using its [OSD integr
 
 ### Raycast extension
 
-If you use [Raycast](https://raycast.com), there is a [BetterDisplay](https://www.raycast.com/pascal_burkhard/betterdisplay) extension available for interacting with BetterDisplay.
+If you use [Raycast](https://raycast.com), a [BetterDisplay extension](https://www.raycast.com/pascal_burkhard/betterdisplay) is available for interacting with BetterDisplay.
 
 ## Localization
 
