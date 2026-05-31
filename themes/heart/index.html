@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heart — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { bpm: 108, impulse: 3.8, ringSpeed: 310, r: 255, g:  40, b:  55 },
+  waiting: { bpm:  55, impulse: 1.8, ringSpeed: 185, r: 255, g: 195, b:  30 },
+  idle:    { bpm:  28, impulse: 0.8, ringSpeed: 110, r:  45, g: 195, b:  90 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// Spring-physics heart scale
+let scale = 1.0, vel = 0;
+const STIFFNESS = 160, DAMPING = 12;
+
+let beatPhase = 0, rings = [], lastTs = 0;
+
+// Parametric heart (mathematical formula) — perfectly shaped
+function heartPath(ctx, cx, cy, size) {
+  const N  = 80;
+  const sx = size / 16.5;
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const t  = (i / N) * Math.PI * 2;
+    const x  = cx + sx * 16 * Math.pow(Math.sin(t), 3);
+    const y  = cy - sx * (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t));
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.bpm       = lerp(cfg.bpm,       tgt.bpm,       k);
+  cfg.impulse   = lerp(cfg.impulse,   tgt.impulse,   k);
+  cfg.ringSpeed = lerp(cfg.ringSpeed, tgt.ringSpeed, k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  // Beat detection
+  const prev = beatPhase;
+  beatPhase = (beatPhase + cfg.bpm / 60 * dt) % 1;
+  if (beatPhase < prev) {
+    vel += cfg.impulse;                // spring impulse
+    rings.push({ r: 0, alpha: 0.80, type: rings.length % 3 === 0 ? 'heart' : 'circle' });
+  }
+
+  // Spring dynamics: always pull toward scale=1
+  const force = (1.0 - scale) * STIFFNESS - vel * DAMPING;
+  vel   += force * dt;
+  scale += vel   * dt;
+  scale  = Math.max(0.85, Math.min(2.0, scale));
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H * 0.50;
+  const baseSize = Math.min(W, H) * 0.20;
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+  const col = `rgb(${cr},${cg},${cb})`;
+
+  // Outer bloom
+  const bloom = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseSize * 3.2);
+  bloom.addColorStop(0, `rgba(${cr},${cg},${cb},0.07)`);
+  bloom.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+  ctx.fillStyle = bloom;
+  ctx.beginPath(); ctx.arc(cx, cy, baseSize * 3.2, 0, Math.PI * 2); ctx.fill();
+
+  // Ripple rings (circles — clean and elegant)
+  rings = rings.filter(r => r.alpha > 0.01);
+  rings.forEach(r => {
+    r.r    += cfg.ringSpeed * dt;
+    r.alpha = Math.max(0, r.alpha - dt * 0.95);
+    ctx.shadowColor = col; ctx.shadowBlur = 5;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${r.alpha.toFixed(2)})`;
+    ctx.lineWidth = 1.5 + r.alpha;
+    ctx.beginPath(); ctx.arc(cx, cy, r.r, 0, Math.PI * 2); ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+
+  const drawSize = baseSize * scale;
+
+  // Outer glow heart (large, transparent)
+  ctx.shadowColor = col; ctx.shadowBlur = 28 * scale;
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.22)`;
+  ctx.lineWidth = 16;
+  heartPath(ctx, cx, cy, drawSize * 1.06);
+  ctx.stroke();
+
+  // Mid heart
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.55)`;
+  ctx.lineWidth = 4;
+  heartPath(ctx, cx, cy, drawSize);
+  ctx.stroke();
+
+  // Filled heart with radial gradient
+  const grad = ctx.createRadialGradient(cx - drawSize*0.18, cy - drawSize*0.12, 0, cx, cy, drawSize * 1.2);
+  grad.addColorStop(0,    `rgba(${cr},${cg},${cb},0.85)`);
+  grad.addColorStop(0.45, `rgba(${cr},${cg},${cb},0.55)`);
+  grad.addColorStop(1,    `rgba(${cr},${cg},${cb},0.05)`);
+  heartPath(ctx, cx, cy, drawSize);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Sharp inner stroke
+  ctx.shadowBlur  = 6;
+  ctx.strokeStyle = col;
+  ctx.lineWidth   = 1.8;
+  heartPath(ctx, cx, cy, drawSize);
+  ctx.stroke();
+
+  // Specular highlight
+  const spec = ctx.createRadialGradient(cx - drawSize*0.32, cy - drawSize*0.28, 0, cx - drawSize*0.2, cy - drawSize*0.1, drawSize * 0.55);
+  spec.addColorStop(0, `rgba(255,255,255,${0.30 * scale})`);
+  spec.addColorStop(1, `rgba(255,255,255,0)`);
+  heartPath(ctx, cx, cy, drawSize);
+  ctx.fillStyle = spec;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+// ── Binary character set ──────────────────────────
+const CHARS = '01';
+const FS    = 18;
+
+// ── State configs ─────────────────────────────────
+const CFGS = {
+  busy:    { speed: 3.5, density: 0.90, fade: 0.14, r: 255, g:  59, b:  48, interval: 22 },
+  waiting: { speed: 1.6, density: 0.52, fade: 0.09, r: 255, g: 204, b:   0, interval: 40 },
+  idle:    { speed: 0.8, density: 0.20, fade: 0.055, r: 52, g: 199, b:  89, interval: 65 },
+};
+
+let cfg = { ...CFGS.idle };
+let tgt = { ...CFGS.idle };
+
+let W, H, cols, rows, columns;
+
+function resize() {
+  W    = canvas.width  = canvas.offsetWidth;
+  H    = canvas.height = canvas.offsetHeight;
+  cols = Math.floor(W / FS);
+  rows = Math.ceil(H / FS);
+  initColumns();
+}
+window.addEventListener('resize', resize);
+
+function initColumns() {
+  columns = Array.from({ length: cols }, (_, i) => {
+    // Pre-populate 45% of columns at random heights for instant visual density
+    const pre = Math.random() < 0.45;
+    return {
+      y:      pre ? Math.floor(Math.random() * rows) : 0,
+      speed:  0.5 + Math.random() * 0.9,
+      active: pre,
+      length: 5 + Math.floor(Math.random() * 14),
+      chars:  [],
+    };
+  });
+}
+
+function randChar() { return CHARS[Math.floor(Math.random() * CHARS.length)]; }
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+let lastTs = 0;
+
+function animate(ts) {
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.speed    = lerp(cfg.speed,    tgt.speed,    k);
+  cfg.density  = lerp(cfg.density,  tgt.density,  k);
+  cfg.fade     = lerp(cfg.fade,     tgt.fade,     k);
+  cfg.interval = lerp(cfg.interval, tgt.interval, k);
+  cfg.r = lerp(cfg.r, tgt.r, k);
+  cfg.g = lerp(cfg.g, tgt.g, k);
+  cfg.b = lerp(cfg.b, tgt.b, k);
+
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  // Fade previous frame — higher alpha = faster fade = sharper, less smear
+  ctx.fillStyle = `rgba(10,10,10,${cfg.fade.toFixed(3)})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // No shadowBlur at all — pure pixel-sharp characters
+  ctx.shadowBlur = 0;
+  ctx.font = `bold ${FS}px 'Courier New', monospace`;
+
+  columns.forEach((col, i) => {
+    // Activation
+    if (!col.active) {
+      if (Math.random() < cfg.density * dt * 3.5) {
+        col.active = true;
+        col.y      = 0;   // start at top immediately — no long off-screen wait
+        col.chars  = [];
+        col.length = 5 + Math.floor(Math.random() * 14);
+        col.speed  = 0.5 + Math.random() * 0.9;
+      }
+      return;
+    }
+
+    const headY = Math.floor(col.y);
+    const x     = i * FS;
+
+    // Occasionally mutate a character in the trail (glitch effect)
+    if (Math.random() < 0.04) {
+      const row = headY - Math.floor(Math.random() * col.length);
+      col.chars[row] = randChar();
+    }
+
+    // Draw: head bright, trail fading — NO blur anywhere
+    for (let row = headY; row > headY - col.length; row--) {
+      if (row < 0 || row >= rows) continue;
+      const age   = headY - row;
+      const alpha = Math.max(0, 1 - age / col.length);
+
+      if (age === 0) {
+        // Head: white, fully opaque
+        ctx.fillStyle = `rgb(230,255,230)`;
+      } else if (age <= 2) {
+        // Near-head: full color
+        ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      } else {
+        // Tail: fade out
+        ctx.fillStyle = `rgba(${cr},${cg},${cb},${(alpha * 0.75).toFixed(2)})`;
+      }
+
+      if (!col.chars[row]) col.chars[row] = randChar();
+      ctx.fillText(col.chars[row], x, row * FS);
+    }
+
+    // Advance head
+    col.y += col.speed * cfg.speed * dt * 4;
+
+    // Reset column when off screen
+    if (col.y - col.length > rows) {
+      col.y      = 0;
+      col.length = 5 + Math.floor(Math.random() * 14);
+      col.speed  = 0.5 + Math.random() * 0.9;
+      col.chars  = [];
+      col.active = Math.random() < cfg.density;
+    }
+  });
+
+  setTimeout(() => requestAnimationFrame(animate), cfg.interval);
+}
+
+// ── State machine ─────────────────────────────────
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() {
+  try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+
+resize();
+requestAnimationFrame(animate);
+setState('idle', null);
+</script>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ripple — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let W, H, cx, cy, maxR;
+function resize() {
+  W  = canvas.width  = canvas.offsetWidth;
+  H  = canvas.height = canvas.offsetHeight;
+  cx = W / 2; cy = H / 2;
+  maxR = Math.min(W, H) * 0.52;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── State configs ─────────────────────────────────
+const CFGS = {
+  busy:    { interval: 550,  rings: 5, speed: 230, lineW: 2.2, r: 255, g:  70, b:  45 },
+  waiting: { interval: 1200, rings: 3, speed: 155, lineW: 1.6, r: 255, g: 195, b:  35 },
+  idle:    { interval: 2800, rings: 1, speed:  95, lineW: 1.1, r:  45, g: 192, b: 100 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// ── Pulses ────────────────────────────────────────
+let pulses   = [];
+let nextPulse = 0;
+
+// ── Draw ──────────────────────────────────────────
+let lastTs = 0;
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.interval = lerp(cfg.interval, tgt.interval, k);
+  cfg.rings    = lerp(cfg.rings,    tgt.rings,    k);
+  cfg.speed    = lerp(cfg.speed,    tgt.speed,    k);
+  cfg.lineW    = lerp(cfg.lineW,    tgt.lineW,    k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Generate new pulse
+  if (ts >= nextPulse) {
+    pulses.push({
+      birth:   ts,
+      speed:   cfg.speed,
+      ringCnt: Math.round(cfg.rings),
+      lineW:   cfg.lineW,
+    });
+    nextPulse = ts + cfg.interval * (0.65 + Math.random() * 0.7);
+  }
+
+  // Persistent center glow
+  const glowR = 30 + 8 * Math.sin(ts * 0.003);
+  const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  glowGrad.addColorStop(0,   `rgba(${cr},${cg},${cb},0.45)`);
+  glowGrad.addColorStop(0.4, `rgba(${cr},${cg},${cb},0.12)`);
+  glowGrad.addColorStop(1,   `rgba(${cr},${cg},${cb},0.00)`);
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
+
+  // Draw + advance pulses
+  pulses = pulses.filter(p => {
+    const age  = (ts - p.birth) / 1000;
+    const keep = false;
+    let anyVisible = false;
+
+    for (let ri = 0; ri < p.ringCnt; ri++) {
+      const initR = ri * 18;
+      const r     = initR + age * p.speed;
+      if (r > maxR * 1.05) continue;
+      anyVisible = true;
+
+      const progress = r / maxR;
+      const alpha    = Math.pow(1 - progress, 1.8) * 0.85;
+      const lw       = p.lineW * (1 - progress * 0.55);
+
+      // Outer soft glow ring
+      ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+      ctx.shadowBlur  = 6;
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(alpha * 0.45).toFixed(2)})`;
+      ctx.lineWidth   = lw * 4;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+
+      // Sharp inner ring
+      ctx.shadowBlur  = 2;
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(2)})`;
+      ctx.lineWidth   = lw;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.shadowBlur  = 0;
+    }
+    return anyVisible;
+  });
+
+  // Center dot
+  ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+  ctx.shadowBlur  = 10;
+  ctx.fillStyle   = `rgb(${cr},${cg},${cb})`;
+  ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle   = 'rgba(255,255,255,0.8)';
+  ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur  = 0;
+}
+
+// ── State machine ─────────────────────────────────
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+requestAnimationFrame(animate);
+setState('idle', null);
+</script>
+</body>
+</html>

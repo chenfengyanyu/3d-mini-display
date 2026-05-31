@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #030a03; overflow: hidden; }
+  canvas { display: block; position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H, cx, cy, radius;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+  cx = W/2; cy = H/2; radius = Math.min(W, H) * 0.44;
+}
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { rpm: 1.80, spawnRate: 4.0, maxBlips: 14, r: 255, g:  59, b:  48 },
+  waiting: { rpm: 0.75, spawnRate: 1.2, maxBlips:  5, r: 255, g: 204, b:   0 },
+  idle:    { rpm: 0.28, spawnRate: 0.3, maxBlips:  2, r:  52, g: 199, b:  89 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// Fully dynamic blips — no fixed pool
+let blips = [];
+let sweepAngle = 0, lastTs = 0;
+
+function spawnBlip() {
+  const angle = Math.random() * Math.PI * 2;
+  const dist  = radius * (0.14 + Math.random() * 0.78);
+  blips.push({ angle, dist, alpha: 0, peak: 0.75 + Math.random() * 0.25, born: false });
+}
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.rpm       = lerp(cfg.rpm,       tgt.rpm,       k);
+  cfg.spawnRate = lerp(cfg.spawnRate, tgt.spawnRate, k);
+  cfg.maxBlips  = lerp(cfg.maxBlips,  tgt.maxBlips,  k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+  const prevAngle = sweepAngle;
+  sweepAngle = (sweepAngle + cfg.rpm * Math.PI * 2 * dt) % (Math.PI * 2);
+  const swept = ((sweepAngle - prevAngle) + Math.PI * 2) % (Math.PI * 2);
+
+  // Phosphor CRT fade
+  ctx.fillStyle = 'rgba(3,10,3,0.10)';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Background disc ──────────────────────────────
+  const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  disc.addColorStop(0,   `rgba(${cr},${cg},${cb},0.07)`);
+  disc.addColorStop(0.7, `rgba(${cr},${cg},${cb},0.03)`);
+  disc.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+  ctx.fillStyle = disc;
+  ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
+
+  // Range rings
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.13)`;
+  ctx.lineWidth = 1;
+  [0.25, 0.5, 0.75, 1].forEach(f => {
+    ctx.beginPath(); ctx.arc(cx, cy, radius * f, 0, Math.PI * 2); ctx.stroke();
+  });
+  // Crosshairs
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.10)`;
+  ctx.setLineDash([4, 8]);
+  ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── Sweep trail ──────────────────────────────────
+  const TRAIL = Math.PI * 0.55;
+  for (let i = 0; i < 36; i++) {
+    const t  = i / 36;
+    const a0 = sweepAngle - TRAIL * (1 - t);
+    const a1 = sweepAngle - TRAIL * (1 - (t + 1/36));
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, radius, a0, a1); ctx.closePath();
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${(t * t * 0.38).toFixed(3)})`;
+    ctx.fill();
+  }
+
+  // ── Sweep line ───────────────────────────────────
+  const ex = cx + Math.cos(sweepAngle) * radius;
+  const ey = cy + Math.sin(sweepAngle) * radius;
+  const sg = ctx.createLinearGradient(cx, cy, ex, ey);
+  sg.addColorStop(0, `rgba(${cr},${cg},${cb},0)`);
+  sg.addColorStop(0.3, `rgba(${cr},${cg},${cb},0.6)`);
+  sg.addColorStop(1, `rgba(255,255,255,0.95)`);
+  ctx.shadowColor = `rgb(${cr},${cg},${cb})`; ctx.shadowBlur = 6;
+  ctx.strokeStyle = sg; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // ── Center dot ───────────────────────────────────
+  ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+  ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+
+  // ── Spawn new blips ──────────────────────────────
+  if (blips.length < Math.round(cfg.maxBlips) && Math.random() < cfg.spawnRate * dt) {
+    spawnBlip();
+  }
+
+  // ── Update & draw blips ──────────────────────────
+  blips = blips.filter(b => {
+    // Check if sweep just passed this blip
+    const delta = ((sweepAngle - b.angle) + Math.PI * 2) % (Math.PI * 2);
+    const justHit = delta <= swept + 0.05;
+
+    if (justHit && !b.born) {
+      b.born  = true;
+      b.alpha = b.peak;
+    } else if (justHit && b.born) {
+      b.alpha = Math.min(b.peak, b.alpha + b.peak * 0.6); // re-hit: refresh
+    }
+
+    b.alpha = Math.max(0, b.alpha - dt * 0.45);
+
+    if (b.alpha < 0.02) return false;   // remove when fully faded
+    if (!b.born) return true;            // keep but don't draw yet
+
+    const bx = cx + Math.cos(b.angle) * b.dist;
+    const by = cy + Math.sin(b.angle) * b.dist;
+    ctx.shadowColor = `rgb(${cr},${cg},${cb})`; ctx.shadowBlur = 9;
+    ctx.fillStyle   = `rgba(255,255,255,${b.alpha.toFixed(2)})`;
+    ctx.beginPath(); ctx.arc(bx, by, 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(b.alpha * 0.45).toFixed(2)})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.stroke();
+    return true;
+  });
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+resize(); requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

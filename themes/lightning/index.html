@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lightning — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #050508; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { interval: 280, maxBolts: 3, branchP: 0.32, r: 255, g:  95, b:  55, flash: 0.18 },
+  waiting: { interval: 800, maxBolts: 2, branchP: 0.16, r: 255, g: 200, b:  45, flash: 0.09 },
+  idle:    { interval: 2600, maxBolts: 1, branchP: 0.07, r:  65, g: 205, b: 105, flash: 0.03 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+let bolts = [], flashAlpha = 0, nextBolt = 500;
+
+function makeBolt(x, y0, y1, depth, scale) {
+  const segs  = [];
+  const pts   = [{ x, y: y0 }];
+  const steps = Math.max(5, Math.floor((y1 - y0) / (20 * scale)));
+
+  for (let i = 1; i <= steps; i++) {
+    const t      = i / steps;
+    const prev   = pts[pts.length - 1];
+    const spread = (65 / (depth + 1)) * scale * (1 - t * 0.35);
+    const nx     = Math.max(8, Math.min(W - 8, prev.x + (Math.random() - 0.5) * spread));
+    pts.push({ x: nx, y: y0 + t * (y1 - y0) });
+  }
+
+  const baseW = Math.max(0.3, (2.6 - depth * 0.7) * scale);
+  segs.push({ pts, width: baseW, alpha: 1.0, decay: 2.5 + depth * 1.6 });
+
+  if (depth < 3) {
+    pts.forEach((p, i) => {
+      if (i < 1 || i === pts.length - 1) return;
+      if (Math.random() < cfg.branchP / (depth + 1) * (3 / steps)) {
+        const bEnd = p.y + (y1 - p.y) * (0.3 + Math.random() * 0.55);
+        segs.push(...makeBolt(p.x, p.y, bEnd, depth + 1, scale * 0.65));
+      }
+    });
+  }
+  return segs;
+}
+
+let lastTs = 0;
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.interval = lerp(cfg.interval, tgt.interval, k);
+  cfg.maxBolts = lerp(cfg.maxBolts, tgt.maxBolts, k);
+  cfg.branchP  = lerp(cfg.branchP,  tgt.branchP,  k);
+  cfg.flash    = lerp(cfg.flash,    tgt.flash,    k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  flashAlpha = Math.max(0, flashAlpha - dt * 4.0);
+
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  // Sky + flash
+  ctx.fillStyle = `rgba(5,5,10,1)`;
+  ctx.fillRect(0, 0, W, H);
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${flashAlpha * 0.22})`;
+    ctx.fillRect(0, 0, W, H);
+    // Ground glow
+    const gnd = ctx.createLinearGradient(0, H * 0.75, 0, H);
+    gnd.addColorStop(0, `rgba(${cr},${cg},${cb},0)`);
+    gnd.addColorStop(1, `rgba(${cr},${cg},${cb},${flashAlpha * 0.35})`);
+    ctx.fillStyle = gnd;
+    ctx.fillRect(0, H * 0.75, W, H * 0.25);
+  }
+
+  // Generate bolt(s)
+  if (ts >= nextBolt) {
+    const count = 1 + Math.floor(Math.random() * Math.round(cfg.maxBolts));
+    let maxFlash = 0;
+    for (let b = 0; b < count; b++) {
+      const scale = 0.45 + Math.random() * 1.1;     // small to large
+      // Pick start: mostly top, occasionally sides
+      const fromSide = Math.random() < 0.08;
+      const sx = fromSide
+        ? (Math.random() < 0.5 ? W * 0.02 : W * 0.98)
+        : W * (0.06 + Math.random() * 0.88);
+      const sy = fromSide ? Math.random() * H * 0.35 : 0;
+      const ey = H * (0.45 + Math.random() * 0.48);
+      bolts.push(...makeBolt(sx, sy, ey, 0, scale));
+      maxFlash = Math.max(maxFlash, scale);
+    }
+    flashAlpha = Math.min(1, cfg.flash * (0.8 + maxFlash * 0.6));
+    // Stagger next bolt slightly when multiple fire
+    nextBolt = ts + cfg.interval * (0.35 + Math.random() * 1.1);
+  }
+
+  // Draw bolts
+  ctx.lineCap = 'round';
+  bolts = bolts.filter(seg => {
+    if (seg.alpha <= 0.01) return false;
+    const a = seg.alpha;
+    // Outer colored glow
+    ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+    ctx.shadowBlur  = 14 * a;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(a * 0.4).toFixed(2)})`;
+    ctx.lineWidth   = seg.width * 5.5;
+    ctx.beginPath();
+    seg.pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    // White hot core
+    ctx.shadowBlur  = 4;
+    ctx.strokeStyle = `rgba(240,248,255,${(a * 0.94).toFixed(2)})`;
+    ctx.lineWidth   = seg.width;
+    ctx.beginPath();
+    seg.pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    seg.alpha -= seg.decay * dt;
+    return true;
+  });
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

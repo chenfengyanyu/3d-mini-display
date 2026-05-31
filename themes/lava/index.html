@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lava — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #080808; overflow: hidden; }
+  canvas { display: block; position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── State configs ─────────────────────────────────
+const CFGS = {
+  busy: {
+    blobCount: 6, speed: 1.4, radius: 0.22, threshold: 1.0,
+    r: 255, g: 55,  b: 30,   // red-orange
+    r2: 255, g2: 120, b2: 20, // secondary warm
+  },
+  waiting: {
+    blobCount: 4, speed: 0.6, radius: 0.19, threshold: 1.0,
+    r: 255, g: 195, b: 0,    // amber
+    r2: 220, g2: 140, b2: 0,
+  },
+  idle: {
+    blobCount: 3, speed: 0.22, radius: 0.17, threshold: 1.0,
+    r: 40,  g: 200, b: 90,   // green
+    r2: 20,  g2: 160, b2: 70,
+  },
+};
+
+let cfg = { ...CFGS.idle };
+let tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// ── Blobs ─────────────────────────────────────────
+// Each blob has a Lissajous-style orbit + personal phase
+const MAX_BLOBS = 6;
+const blobs = Array.from({ length: MAX_BLOBS }, (_, i) => ({
+  ax: 0.28 + Math.random() * 0.18,   // x amplitude (fraction of half-size)
+  ay: 0.28 + Math.random() * 0.18,
+  fx: 0.38 + Math.random() * 0.55,   // frequency multiplier x
+  fy: 0.41 + Math.random() * 0.55,
+  px: Math.random() * Math.PI * 2,   // phase x
+  py: Math.random() * Math.PI * 2,   // phase y
+  ox: 0.5 + (Math.random() - 0.5) * 0.3, // orbit center (normalized)
+  oy: 0.5 + (Math.random() - 0.5) * 0.3,
+}));
+
+// ── Marching-squares grid (low-res for performance) ──
+const GRID = 60;  // grid cells per axis
+let field = new Float32Array((GRID + 1) * (GRID + 1));
+
+// ── Render ────────────────────────────────────────
+let t = 0, lastTs = 0;
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  // Lerp config
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.speed     = lerp(cfg.speed,     tgt.speed,     k);
+  cfg.radius    = lerp(cfg.radius,    tgt.radius,    k);
+  cfg.blobCount = lerp(cfg.blobCount, tgt.blobCount, k);
+  cfg.r  = lerp(cfg.r,  tgt.r,  k); cfg.g  = lerp(cfg.g,  tgt.g,  k); cfg.b  = lerp(cfg.b,  tgt.b,  k);
+  cfg.r2 = lerp(cfg.r2, tgt.r2, k); cfg.g2 = lerp(cfg.g2, tgt.g2, k); cfg.b2 = lerp(cfg.b2, tgt.b2, k);
+
+  t += dt * cfg.speed;
+
+  const activeBlobs = Math.round(cfg.blobCount);
+  const R = cfg.radius * Math.min(W, H);
+  const R2 = R * R;
+  const cr  = Math.round(cfg.r),  cg  = Math.round(cfg.g),  cb  = Math.round(cfg.b);
+  const cr2 = Math.round(cfg.r2), cg2 = Math.round(cfg.g2), cb2 = Math.round(cfg.b2);
+
+  // Compute blob positions
+  const positions = [];
+  for (let i = 0; i < activeBlobs; i++) {
+    const b = blobs[i];
+    const x = (b.ox + b.ax * Math.sin(t * b.fx + b.px)) * W;
+    const y = (b.oy + b.ay * Math.cos(t * b.fy + b.py)) * H;
+    positions.push({ x, y });
+  }
+
+  // Background
+  ctx.fillStyle = '#080808';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Scalar field via Metaball formula ─────────────
+  const cellW = W / GRID;
+  const cellH = H / GRID;
+
+  for (let gy = 0; gy <= GRID; gy++) {
+    for (let gx = 0; gx <= GRID; gx++) {
+      const px = gx * cellW;
+      const py = gy * cellH;
+      let v = 0;
+      for (let i = 0; i < activeBlobs; i++) {
+        const dx = px - positions[i].x;
+        const dy = py - positions[i].y;
+        v += R2 / (dx * dx + dy * dy + 1);
+      }
+      field[gy * (GRID + 1) + gx] = v;
+    }
+  }
+
+  // ── Render blobs as filled gradients (soft, layered) ──
+  // Instead of marching squares (expensive to draw filled), we use layered
+  // radial gradients per blob + global composite blending for the merge effect.
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+
+  for (let i = 0; i < activeBlobs; i++) {
+    const { x, y } = positions[i];
+    // Alternate color between primary and secondary for visual richness
+    const [pr, pg, pb] = i % 2 === 0 ? [cr, cg, cb] : [cr2, cg2, cb2];
+
+    // Large soft halo
+    const haloR = R * 1.8;
+    const halo = ctx.createRadialGradient(x, y, 0, x, y, haloR);
+    halo.addColorStop(0,    `rgba(${pr},${pg},${pb},0.22)`);
+    halo.addColorStop(0.45, `rgba(${pr},${pg},${pb},0.10)`);
+    halo.addColorStop(1,    `rgba(${pr},${pg},${pb},0.00)`);
+    ctx.beginPath();
+    ctx.arc(x, y, haloR, 0, Math.PI * 2);
+    ctx.fillStyle = halo;
+    ctx.fill();
+
+    // Dense core
+    const coreR = R * 0.7;
+    const core = ctx.createRadialGradient(x, y, 0, x, y, coreR);
+    core.addColorStop(0,    `rgba(${pr},${pg},${pb},0.90)`);
+    core.addColorStop(0.55, `rgba(${pr},${pg},${pb},0.50)`);
+    core.addColorStop(1,    `rgba(${pr},${pg},${pb},0.00)`);
+    ctx.beginPath();
+    ctx.arc(x, y, coreR, 0, Math.PI * 2);
+    ctx.fillStyle = core;
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // ── Bright specular highlight on each blob ────────
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < activeBlobs; i++) {
+    const { x, y } = positions[i];
+    const specR = R * 0.18;
+    const sx = x - R * 0.14;
+    const sy = y - R * 0.18;
+    const spec = ctx.createRadialGradient(sx, sy, 0, sx, sy, specR);
+    spec.addColorStop(0, 'rgba(255,255,255,0.55)');
+    spec.addColorStop(1, 'rgba(255,255,255,0.00)');
+    ctx.beginPath();
+    ctx.arc(sx, sy, specR, 0, Math.PI * 2);
+    ctx.fillStyle = spec;
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // ── Vignette ──────────────────────────────────────
+  const vig = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.25, W/2, H/2, Math.min(W,H)*0.8);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Ambient floor color tint ──────────────────────
+  ctx.fillStyle = `rgba(${cr},${cg},${cb},0.03)`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ── State machine ─────────────────────────────────
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() {
+  try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+
+requestAnimationFrame(animate);
+setState('idle');
+</script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waveform — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { amp: 0.82, speed: 3.6, r: 255, g:  59, b:  48 },
+  waiting: { amp: 0.45, speed: 1.5, r: 255, g: 204, b:   0 },
+  idle:    { amp: 0.12, speed: 0.6, r:  52, g: 199, b:  89 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+const BARS = 52;
+let t = 0, lastTs = 0;
+
+// Per-bar random offsets for organic variety
+const offsets = Array.from({ length: BARS }, (_, i) => ({
+  p1: i * 0.24,
+  p2: i * 0.13 + 0.5,
+  p3: i * 0.31 + 1.2,
+  p4: i * 0.07 + 0.8,
+}));
+
+function barNorm(i, t) {
+  const o = offsets[i];
+  return Math.max(0, (
+    Math.sin(o.p1 + t) * 0.38 +
+    Math.sin(o.p2 + t * 1.7) * 0.25 +
+    Math.sin(o.p3 + t * 3.1) * 0.18 +
+    Math.sin(o.p4 + t * 5.3) * 0.10 +
+    0.45
+  ));
+}
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.amp   = lerp(cfg.amp,   tgt.amp,   k);
+  cfg.speed = lerp(cfg.speed, tgt.speed, k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  t += cfg.speed * dt;
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+  const col = `rgb(${cr},${cg},${cb})`;
+
+  const pad    = W * 0.06;
+  const barW   = (W - pad * 2) / BARS;
+  const gap    = barW * 0.22;
+  const bw     = barW - gap;
+  const floor  = H * 0.78;
+  const maxH   = H * 0.68;
+
+  for (let i = 0; i < BARS; i++) {
+    const norm = barNorm(i, t);
+    const bh   = Math.max(3, norm * cfg.amp * maxH);
+    const x    = pad + i * barW + gap / 2;
+    const y    = floor - bh;
+
+    // Bar gradient: bright top → dim bottom
+    const grad = ctx.createLinearGradient(0, y, 0, floor);
+    grad.addColorStop(0,   `rgba(${cr},${cg},${cb},0.9)`);
+    grad.addColorStop(0.6, `rgba(${cr},${cg},${cb},0.55)`);
+    grad.addColorStop(1,   `rgba(${cr},${cg},${cb},0.15)`);
+
+    ctx.shadowColor = col;
+    ctx.shadowBlur  = 8;
+    ctx.fillStyle   = grad;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, y, bw, bh, 2) : ctx.rect(x, y, bw, bh);
+    ctx.fill();
+
+    // Reflection below
+    const refGrad = ctx.createLinearGradient(0, floor, 0, floor + bh * 0.45);
+    refGrad.addColorStop(0, `rgba(${cr},${cg},${cb},0.12)`);
+    refGrad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.shadowBlur  = 0;
+    ctx.fillStyle   = refGrad;
+    ctx.fillRect(x, floor, bw, bh * 0.45);
+  }
+  ctx.shadowBlur = 0;
+
+  // Subtle floor line
+  ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.15)`;
+  ctx.lineWidth   = 1;
+  ctx.beginPath(); ctx.moveTo(pad, floor); ctx.lineTo(W - pad, floor); ctx.stroke();
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

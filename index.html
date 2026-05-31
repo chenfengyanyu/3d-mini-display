@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Status — Theme Switcher</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0d;
+    --surface: #161616;
+    --border: #252525;
+    --text: #e0e0e0;
+    --text-dim: #555;
+    --accent-busy:    #ff3b30;
+    --accent-waiting: #ffcc00;
+    --accent-idle:    #34c759;
+  }
+
+  html { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    gap: 16px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  .logo span { color: var(--text-dim); font-weight: 400; }
+
+  /* ── Status badge ── */
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid;
+    transition: all 0.3s ease;
+    background: transparent;
+  }
+
+  .status-badge .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    transition: background 0.3s ease;
+  }
+
+  .status-badge.busy    { color: var(--accent-busy);    border-color: rgba(255,59,48,0.3);  }
+  .status-badge.waiting { color: var(--accent-waiting); border-color: rgba(255,204,0,0.3); }
+  .status-badge.idle    { color: var(--accent-idle);    border-color: rgba(52,199,89,0.3);  }
+
+  .status-badge.busy    .dot { background: var(--accent-busy);    animation: dot-pulse 1s ease-in-out infinite; }
+  .status-badge.waiting .dot { background: var(--accent-waiting); animation: dot-blink 1.6s ease-in-out infinite; }
+  .status-badge.idle    .dot { background: var(--accent-idle); }
+
+  @keyframes dot-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+  @keyframes dot-blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  /* ── Theme toggle button (bottom-left) ── */
+  .theme-toggle {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(20,20,20,0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid #333;
+    color: #777;
+    font-size: 17px;
+    cursor: pointer;
+    z-index: 100;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: #555; background: rgba(36,36,36,0.95); }
+  .theme-toggle.open  { color: var(--text); border-color: rgba(255,255,255,0.2); }
+
+  /* ── Theme drawer (slides up from the button) ── */
+  .theme-drawer {
+    position: fixed;
+    bottom: 70px;
+    left: 20px;
+    background: rgba(16,16,16,0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 99;
+    transform: translateY(12px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.22s cubic-bezier(0.34,1.4,0.64,1), opacity 0.18s ease;
+    min-width: 148px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+  }
+  .theme-drawer::-webkit-scrollbar { width: 4px; }
+  .theme-drawer::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  .theme-drawer.open {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* ── Theme card (vertical list) ── */
+  .theme-card {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    text-align: left;
+    width: 100%;
+  }
+  .theme-card:hover  { background: rgba(255,255,255,0.05); color: var(--text); }
+  .theme-card.active { background: rgba(255,255,255,0.08); color: var(--text); border-color: rgba(255,255,255,0.12); }
+  .theme-card .icon  { font-size: 15px; }
+
+  /* ── Main iframe ── */
+  .frame-wrap {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    flex: 1;
+  }
+
+  /* ── Info footer ── */
+  footer {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .footer-info {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .footer-info code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Theme iframe -->
+<div class="frame-wrap">
+  <iframe id="theme-frame" src="" title="Theme"></iframe>
+</div>
+
+<!-- Theme toggle button -->
+<button class="theme-toggle" id="theme-toggle" title="切换主题">⊞</button>
+
+<!-- Theme drawer -->
+<div class="theme-drawer" id="theme-drawer">
+  <div id="theme-list"></div>
+</div>
+
+<script>
+  // ── Theme registry ────────────────────────────────
+  // To add a new theme: add one entry here, create themes/<id>/index.html
+  const THEMES = [
+    { id: 'traffic-light', name: '红绿灯',  icon: '🚦' },
+    { id: 'ecg',           name: '心电图',  icon: '❤️' },
+    { id: 'orb',           name: '呼吸球',  icon: '🔮' },
+    { id: 'particles',     name: '粒子漩涡', icon: '✨' },
+    { id: 'matrix',        name: '数字雨',  icon: '💻' },
+    { id: 'lightning',     name: '雷电风暴', icon: '⚡' },
+    { id: 'aurora',        name: '极光',    icon: '🌌' },
+    { id: 'radar',         name: '雷达扫描', icon: '📡' },
+    { id: 'ripple',        name: '引力涟漪', icon: '🌀' },
+    { id: 'heart',         name: '心跳脉冲', icon: '🫀' },
+    { id: 'flowfield',     name: '流场烟雾', icon: '🌫️' },
+    { id: 'waveform',      name: '音频波形', icon: '🎵' },
+    { id: 'cube',          name: '旋转线框', icon: '🧊' },
+    { id: 'hourglass',     name: '数字沙漏', icon: '⏳' },
+    { id: 'lava',          name: '熔岩灯',  icon: '🫧' },
+    { id: 'starfield',     name: '星空',    icon: '🌠' },
+  ];
+
+  // ── State ─────────────────────────────────────────
+  let currentTheme     = THEMES[0].id;
+  let currentState     = null;
+  let currentLastEvent = null;
+
+  // ── Build theme cards ─────────────────────────────
+  const themeList  = document.getElementById('theme-list');
+  const themeFrame = document.getElementById('theme-frame');
+  const toggleBtn  = document.getElementById('theme-toggle');
+  const drawer     = document.getElementById('theme-drawer');
+  let drawerOpen   = false;
+
+  toggleBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    drawerOpen = !drawerOpen;
+    drawer.classList.toggle('open', drawerOpen);
+    toggleBtn.classList.toggle('open', drawerOpen);
+  });
+
+  document.addEventListener('click', e => {
+    if (drawerOpen && !drawer.contains(e.target) && e.target !== toggleBtn) {
+      drawerOpen = false;
+      drawer.classList.remove('open');
+      toggleBtn.classList.remove('open');
+    }
+  });
+
+  function renderThemes() {
+    themeList.innerHTML = '';
+    THEMES.forEach(theme => {
+      const card = document.createElement('button');
+      card.className = 'theme-card' + (theme.id === currentTheme ? ' active' : '');
+      card.innerHTML = `<span class="icon">${theme.icon}</span>${theme.name}`;
+      card.addEventListener('click', () => {
+        switchTheme(theme.id);
+        drawerOpen = false;
+        drawer.classList.remove('open');
+        toggleBtn.classList.remove('open');
+      });
+      themeList.appendChild(card);
+    });
+  }
+
+  function switchTheme(id) {
+    currentTheme = id;
+    themeFrame.src = `themes/${id}/index.html`;
+    renderThemes();
+    themeFrame.onload = () => sendStateToTheme(currentState, currentLastEvent);
+  }
+
+  function sendStateToTheme(state, lastEvent) {
+    if (!state) return;
+    try {
+      themeFrame.contentWindow.postMessage({ state, lastEvent }, '*');
+    } catch { /* iframe may not be ready */ }
+  }
+
+  // ── Poll /api/status ──────────────────────────────
+  async function pollStatus() {
+    try {
+      const res  = await fetch('/api/status');
+      const data = await res.json();
+
+      if (data.state && (data.state !== currentState || data.lastEvent !== currentLastEvent)) {
+        currentState     = data.state;
+        currentLastEvent = data.lastEvent || null;
+        sendStateToTheme(currentState, currentLastEvent);
+      }
+    } catch {
+      // Server not running
+    }
+  }
+
+  // ── Keyboard shortcut: ArrowRight/ArrowLeft cycles through themes ──
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+      const idx = THEMES.findIndex(t => t.id === currentTheme);
+      let next;
+      if (e.key === 'ArrowRight') next = THEMES[(idx + 1) % THEMES.length];
+      else if (e.key === 'ArrowLeft') next = THEMES[(idx - 1 + THEMES.length) % THEMES.length];
+      else if (e.key === 'ArrowUp')   next = THEMES[0];
+      else                            next = THEMES[THEMES.length - 1];
+      switchTheme(next.id);
+    }
+  });
+
+  // ── Init ──────────────────────────────────────────
+  renderThemes();
+  switchTheme(currentTheme);
+  setInterval(pollStatus, 250);   // 250ms for near-instant state detection
+  pollStatus();
+</script>
+</body>
+</html>

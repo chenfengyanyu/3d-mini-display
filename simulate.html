@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traffic Light Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+    color: white;
+    gap: 32px;
+    padding: 24px;
+  }
+
+  h2 {
+    font-size: 13px;
+    color: #475569;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── Bloom ── */
+  .bloom {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90vmin; height: 90vmin;
+    border-radius: 50%;
+    pointer-events: none;
+    transition: background 0.7s ease;
+    z-index: 0;
+  }
+  .bloom.busy    { background: radial-gradient(circle, rgba(255,59,48,0.07)  0%, transparent 70%); }
+  .bloom.waiting { background: radial-gradient(circle, rgba(255,204,0,0.06)  0%, transparent 70%); }
+  .bloom.idle    { background: radial-gradient(circle, rgba(52,199,89,0.06)  0%, transparent 70%); }
+
+  /* ── Scene ── */
+  .scene {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform-origin: center center;
+  }
+
+  .housing {
+    width: 160px;
+    background: linear-gradient(160deg, #323232 0%, #242424 100%);
+    border-radius: 28px;
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    border: 1.5px solid #888;
+    box-shadow:
+      0 0 0 1px #555,
+      0 14px 52px rgba(0,0,0,0.85),
+      inset 0 1px 0 rgba(255,255,255,0.1);
+    position: relative;
+  }
+  .housing::before {
+    content: '';
+    position: absolute;
+    top: -10px; left: 50%;
+    transform: translateX(-50%);
+    width: 56px; height: 10px;
+    background: #2e2e2e;
+    border-radius: 5px 5px 0 0;
+    border: 1.5px solid #888;
+    border-bottom: none;
+  }
+
+  .light-socket {
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    background: #0e0e0e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 3px 12px rgba(0,0,0,0.9);
+  }
+
+  .light {
+    width: 84px; height: 84px;
+    border-radius: 50%;
+    opacity: 0.1;
+    position: relative;
+    transition: opacity 0.45s ease, box-shadow 0.45s ease, transform 0.45s ease;
+  }
+  .light::after {
+    content: '';
+    position: absolute;
+    top: 10%; left: 15%;
+    width: 34%; height: 34%;
+    background: radial-gradient(circle, rgba(255,255,255,0.45) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .light.red    { background: radial-gradient(circle at 40% 35%, #ff8a82, #ff3b30 55%, #b02820); }
+  .light.yellow { background: radial-gradient(circle at 40% 35%, #ffec82, #ffcc00 55%, #c09800); }
+  .light.green  { background: radial-gradient(circle at 40% 35%, #8aff9e, #34c759 55%, #1a7a38); }
+
+  .light.active { opacity: 1; transform: scale(1.05); }
+  .light.red.active {
+    box-shadow: 0 0 14px 5px rgba(255,59,48,0.55), 0 0 45px 14px rgba(255,59,48,0.28), 0 0 90px 24px rgba(255,59,48,0.12);
+    animation: pulse-red 1s ease-in-out infinite;
+  }
+  .light.yellow.active {
+    box-shadow: 0 0 14px 5px rgba(255,204,0,0.55), 0 0 45px 14px rgba(255,204,0,0.28), 0 0 90px 24px rgba(255,204,0,0.12);
+    animation: blink-yellow 1.6s ease-in-out infinite;
+  }
+  .light.green.active {
+    box-shadow: 0 0 14px 5px rgba(52,199,89,0.55), 0 0 45px 14px rgba(52,199,89,0.28), 0 0 90px 24px rgba(52,199,89,0.12);
+    animation: glow-green 2.8s ease-in-out infinite;
+  }
+
+  @keyframes pulse-red {
+    0%,100% { box-shadow: 0 0 14px 5px rgba(255,59,48,0.55), 0 0 45px 14px rgba(255,59,48,0.28), 0 0 90px 24px rgba(255,59,48,0.12); transform: scale(1.05); }
+    50%      { box-shadow: 0 0 22px 9px rgba(255,59,48,0.75), 0 0 65px 22px rgba(255,59,48,0.38), 0 0 130px 34px rgba(255,59,48,0.16); transform: scale(1.09); }
+  }
+  @keyframes blink-yellow {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.2; }
+  }
+  @keyframes glow-green {
+    0%,100% { box-shadow: 0 0 14px 5px rgba(52,199,89,0.45), 0 0 45px 14px rgba(52,199,89,0.22), 0 0 90px 24px rgba(52,199,89,0.09); }
+    50%      { box-shadow: 0 0 20px 7px rgba(52,199,89,0.65), 0 0 60px 20px rgba(52,199,89,0.32), 0 0 110px 28px rgba(52,199,89,0.14); }
+  }
+
+  .pole {
+    width: 16px; height: 110px;
+    background: linear-gradient(to right, #2e2e2e, #444 40%, #222);
+    border-radius: 0 0 5px 5px;
+    border: 1px solid #555; border-top: none;
+  }
+  .base {
+    width: 110px; height: 18px;
+    background: linear-gradient(to bottom, #333, #262626);
+    border-radius: 8px; border: 1px solid #666;
+  }
+  .ground-glow {
+    width: 280px; height: 8px;
+    border-radius: 50%; margin-top: 10px;
+    transition: background 0.5s ease, box-shadow 0.5s ease;
+  }
+  .ground-glow.busy    { background: radial-gradient(ellipse, rgba(255,59,48,0.18)  0%, transparent 70%); box-shadow: 0 0 32px 10px rgba(255,59,48,0.09); }
+  .ground-glow.waiting { background: radial-gradient(ellipse, rgba(255,204,0,0.15)  0%, transparent 70%); box-shadow: 0 0 32px 10px rgba(255,204,0,0.07); }
+  .ground-glow.idle    { background: radial-gradient(ellipse, rgba(52,199,89,0.15)  0%, transparent 70%); box-shadow: 0 0 32px 10px rgba(52,199,89,0.07); }
+
+  /* ── Controls ── */
+  .controls {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  button {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: 1.5px solid;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    letter-spacing: 0.04em;
+  }
+  button:active { transform: scale(0.96); }
+
+  .btn-busy {
+    background: rgba(255,59,48,0.12);
+    border-color: #ff3b30;
+    color: #ff8a82;
+  }
+  .btn-busy:hover { background: rgba(255,59,48,0.25); }
+
+  .btn-pretool {
+    background: rgba(255,59,48,0.06);
+    border-color: #7a2020;
+    color: #cc6060;
+    display: none;
+  }
+
+  .btn-stop {
+    background: rgba(255,204,0,0.1);
+    border-color: #ffcc00;
+    color: #ffec82;
+  }
+  .btn-stop:hover { background: rgba(255,204,0,0.22); }
+
+  .btn-idle {
+    background: rgba(52,199,89,0.08);
+    border-color: #34c759;
+    color: #8aff9e;
+  }
+  .btn-idle:hover { background: rgba(52,199,89,0.2); }
+
+  /* ── Status log ── */
+  .log-panel {
+    position: relative;
+    z-index: 2;
+    width: 340px;
+    max-height: 150px;
+    overflow-y: auto;
+    background: rgba(15,23,42,0.6);
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .log-panel::-webkit-scrollbar { width: 4px; }
+  .log-panel::-webkit-scrollbar-track { background: transparent; }
+  .log-panel::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+  .log-entry { display: flex; gap: 8px; }
+  .log-time  { color: #334155; flex-shrink: 0; }
+  .log-msg.busy    { color: #ff8a82; }
+  .log-msg.waiting { color: #ffec82; }
+  .log-msg.idle    { color: #8aff9e; }
+  .log-msg.info    { color: #64748b; }
+
+  /* ── State badge ── */
+  .state-badge {
+    position: relative;
+    z-index: 2;
+    font-size: 12px;
+    padding: 5px 16px;
+    border-radius: 20px;
+    border: 1px solid;
+    transition: all 0.3s ease;
+  }
+  .state-badge.busy    { background: rgba(255,59,48,0.12); border-color: #ff3b30; color: #ff8a82; }
+  .state-badge.waiting { background: rgba(255,204,0,0.1);  border-color: #ffcc00; color: #ffec82; }
+  .state-badge.idle    { background: rgba(52,199,89,0.08); border-color: #34c759; color: #8aff9e; }
+
+  /* countdown - unused in new logic */
+  #countdown { display: none; }
+</style>
+</head>
+<body>
+
+<div class="bloom idle" id="bloom"></div>
+
+<h2>Traffic Light · State Simulator</h2>
+
+<div class="scene" id="scene">
+  <div class="housing">
+    <div class="light-socket"><div class="light red"    id="light-red"   ></div></div>
+    <div class="light-socket"><div class="light yellow" id="light-yellow"></div></div>
+    <div class="light-socket"><div class="light green"  id="light-green" ></div></div>
+  </div>
+  <div class="pole"></div>
+  <div class="base"></div>
+  <div class="ground-glow idle" id="glow"></div>
+</div>
+
+<div class="state-badge idle" id="badge">○ IDLE</div>
+<div id="countdown"></div>
+
+<div class="controls">
+  <div class="btn-row">
+    <button class="btn-busy"    onclick="simulate('busy')">UserPromptSubmit / PreToolUse → busy 🔴</button>
+  </div>
+  <div class="btn-row">
+    <button class="btn-stop" onclick="simulate('waiting')">Stop → waiting 🟡</button>
+    <button class="btn-idle" onclick="simulate('idle')">3s 无事件 → idle 🟢</button>
+  </div>
+</div>
+
+<div class="log-panel" id="log"></div>
+
+<script>
+  const lights = {
+    busy:    document.getElementById('light-red'),
+    waiting: document.getElementById('light-yellow'),
+    idle:    document.getElementById('light-green'),
+  };
+  const glow    = document.getElementById('glow');
+  const bloom   = document.getElementById('bloom');
+  const scene   = document.getElementById('scene');
+  const badge   = document.getElementById('badge');
+  const logEl   = document.getElementById('log');
+  const cdEl    = document.getElementById('countdown');
+
+  // ── Scale ──
+  const NATURAL_W = 170, NATURAL_H = 560;
+  function updateScale() {
+    const s = Math.min(
+      (window.innerWidth * 0.35) / NATURAL_W,
+      (window.innerHeight * 0.45) / NATURAL_H
+    );
+    scene.style.transform = `scale(${Math.max(0.55, s)})`;
+  }
+  window.addEventListener('resize', updateScale);
+  updateScale();
+
+  // ── Log ──
+  function addLog(msg, cls) {
+    const now = new Date();
+    const t = now.toTimeString().slice(0,8);
+    const el = document.createElement('div');
+    el.className = 'log-entry';
+    el.innerHTML = `<span class="log-time">${t}</span><span class="log-msg ${cls}">${msg}</span>`;
+    logEl.appendChild(el);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ── Badge ──
+  const BADGE_LABELS = { busy: '● BUSY', waiting: '◐ WAITING', idle: '○ IDLE' };
+  function setBadge(state) {
+    badge.textContent = BADGE_LABELS[state] || state;
+    badge.className = `state-badge ${state}`;
+  }
+
+  // ── Visual ──
+  let displayState = null;
+  function applyVisual(state) {
+    if (state === displayState) return;
+    displayState = state;
+    Object.values(lights).forEach(l => l.classList.remove('active'));
+    if (lights[state]) lights[state].classList.add('active');
+    glow.className  = `ground-glow ${state}`;
+    bloom.className = `bloom ${state}`;
+    setBadge(state);
+  }
+
+  // ── State machine: strictly follow server state ──
+  let lastState = null;
+  function setTrafficLight(state) {
+    if (state === lastState) return;
+    lastState = state;
+    applyVisual(state);
+  }
+
+  // ── Simulate button ──
+  const stateLabels = { busy: 'busy 🔴', waiting: 'waiting 🟡', idle: 'idle 🟢' };
+  const stateDesc = {
+    busy:    '红灯：Claude 正在工作',
+    waiting: '黄灯：Claude 完成一个 turn，等待判断是否真正结束',
+    idle:    '绿灯：3s 无新事件，可以输入下一条消息',
+  };
+  function simulate(state) {
+    addLog(`→ ${stateLabels[state]}  ${stateDesc[state]}`, state);
+    setTrafficLight(state);
+  }
+
+  // ── Init ──
+  applyVisual('idle');
+  setBadge('idle');
+  addLog('模拟器就绪，点击按钮触发状态', 'info');
+</script>
+</body>
+</html>

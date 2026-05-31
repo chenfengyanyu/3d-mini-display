@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particles — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+  initParticles();
+}
+window.addEventListener('resize', resize);
+
+// ── State configs ─────────────────────────────────
+const CFGS = {
+  busy:    { speed: 0.10, minR: 0.04, maxR: 0.18, count: 80, trail: 0.22, turb: 1.0, r: 255, g:  70, b:  40 },
+  waiting: { speed: 0.025, minR: 0.09, maxR: 0.22, count: 60, trail: 0.30, turb: 0.15, r: 255, g: 204, b:   0 },
+  idle:    { speed: 0.007, minR: 0.14, maxR: 0.32, count: 42, trail: 0.45, turb: 0.0,  r:  52, g: 199, b:  89 },
+};
+
+let cfg = { ...CFGS.idle };
+let tgt = { ...CFGS.idle };
+
+// ── Particles ─────────────────────────────────────
+const N = 80; // max particles
+let particles = [];
+
+function initParticles() {
+  const base = Math.min(W, H);
+  particles = Array.from({ length: N }, (_, i) => ({
+    angle:  (i / N) * Math.PI * 2 + Math.random() * 0.5,
+    radius: base * (CFGS.idle.minR + Math.random() * (CFGS.idle.maxR - CFGS.idle.minR)),
+    speed:  CFGS.idle.speed * (0.5 + Math.random() * 1.0),
+    size:   1.4 + Math.random() * 2.0,
+    offset: Math.random() * Math.PI * 2,
+    driftR: 0,   // radial displacement (turbulence)
+    driftA: 0,   // angular displacement (turbulence)
+    impulseTimer: Math.random() * 2,  // timer for random impulse kicks
+  }));
+}
+
+let lastTs = 0;
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.speed = lerp(cfg.speed, tgt.speed, k);
+  cfg.minR  = lerp(cfg.minR,  tgt.minR,  k);
+  cfg.maxR  = lerp(cfg.maxR,  tgt.maxR,  k);
+  cfg.count = lerp(cfg.count, tgt.count, k);
+  cfg.trail = lerp(cfg.trail, tgt.trail, k);
+  cfg.turb  = lerp(cfg.turb,  tgt.turb,  k);
+  cfg.r = lerp(cfg.r, tgt.r, k);
+  cfg.g = lerp(cfg.g, tgt.g, k);
+  cfg.b = lerp(cfg.b, tgt.b, k);
+
+  const cx = W / 2, cy = H / 2;
+  const base = Math.min(W, H);
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  // Trail fade
+  ctx.fillStyle = `rgba(10,10,10,${cfg.trail})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Center glow
+  const glowR = base * 0.12;
+  const glow  = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  glow.addColorStop(0, `rgba(${cr},${cg},${cb},0.12)`);
+  glow.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+  ctx.beginPath();
+  ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // Active count
+  const active = Math.round(cfg.count);
+
+  // Update + draw particles
+  particles.forEach((p, i) => {
+    if (i >= active) return;
+
+    // Lerp radius toward target range
+    const targetR = base * (cfg.minR + (i / active) * (cfg.maxR - cfg.minR));
+    p.radius = lerp(p.radius, targetR, k * 0.25);
+
+    // Orbital advance — alternating direction for vortex depth
+    const dir = i % 2 === 0 ? 1 : -1;
+    const orbitSpeed = p.speed * cfg.speed / CFGS.idle.speed;
+    p.angle += orbitSpeed * dir * dt * 60;
+    p.offset += 0.6 * dt;
+
+    // ── Turbulence impulses (busy state) ──────────
+    p.impulseTimer -= dt;
+    if (p.impulseTimer <= 0 && cfg.turb > 0.05) {
+      // Random kick: radial burst + angular shove
+      const kick = cfg.turb * (0.6 + Math.random() * 0.8);
+      p.driftR += (Math.random() - 0.5) * base * 0.28 * kick;
+      p.driftA += (Math.random() - 0.5) * 0.6 * kick;
+      p.impulseTimer = 0.08 + Math.random() * 0.25;  // next kick in 80–330ms
+    }
+
+    // Dampen drift (particles snap back to orbit)
+    const dampR = Math.pow(0.012, dt);
+    const dampA = Math.pow(0.018, dt);
+    p.driftR *= dampR;
+    p.driftA *= dampA;
+
+    // Effective position
+    const effectiveR = Math.max(base * 0.02, p.radius + p.driftR);
+    const effectiveA = p.angle + p.driftA;
+    const x = cx + Math.cos(effectiveA) * effectiveR;
+    const y = cy + Math.sin(effectiveA) * effectiveR + Math.sin(p.offset) * p.radius * 0.03;
+
+    // Alpha: inner particles brighter
+    const alpha = 0.55 + 0.45 * (1 - i / active);
+    const sz    = p.size * (0.65 + 0.55 * alpha);
+
+    // Draw: small tight glow for clarity
+    ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+    ctx.shadowBlur  = sz * 2.5;
+    ctx.beginPath();
+    ctx.arc(x, y, sz, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(2)})`;
+    ctx.fill();
+
+    // Bright core dot (sharper)
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(x, y, sz * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${(alpha * 0.55).toFixed(2)})`;
+    ctx.fill();
+  });
+
+  ctx.shadowBlur = 0;
+
+  // Center dot
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur  = 12;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+// ── State machine ─────────────────────────────────
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() {
+  try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+
+resize();
+requestAnimationFrame(animate);
+setState('idle', null);
+</script>
+</body>
+</html>

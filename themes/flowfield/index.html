@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow Field — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; initParticles(); }
+window.addEventListener('resize', resize);
+
+const CFGS = {
+  busy:    { count: 300, speed: 160, tScale: 1.7, fade: 0.13, r: 255, g:  80, b:  45 },
+  waiting: { count: 160, speed:  78, tScale: 0.7, fade: 0.20, r: 255, g: 195, b:  35 },
+  idle:    { count:  60, speed:  28, tScale: 0.22, fade: 0.35, r:  45, g: 195, b:  90 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+let flowT = 0;
+function angle(x, y) {
+  const nx = x * 0.0036, ny = y * 0.0036;
+  return Math.sin(nx + flowT * 0.36) * Math.PI * 1.7
+       + Math.cos(ny + flowT * 0.28) * Math.PI * 1.4
+       + Math.sin((nx + ny) * 0.85 + flowT * 0.20) * Math.PI * 0.9;
+}
+
+const HISTORY = 5;  // trail length in positions
+const MAX_P   = 320;
+let particles = [];
+
+function initParticles() {
+  particles = Array.from({ length: MAX_P }, () => ({
+    x:    Math.random() * W,
+    y:    Math.random() * H,
+    hist: [],
+    age:  Math.floor(Math.random() * 60),
+    maxAge: 50 + Math.floor(Math.random() * 70),
+  }));
+}
+
+let lastTs = 0;
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.count  = lerp(cfg.count,  tgt.count,  k);
+  cfg.speed  = lerp(cfg.speed,  tgt.speed,  k);
+  cfg.tScale = lerp(cfg.tScale, tgt.tScale, k);
+  cfg.fade   = lerp(cfg.fade,   tgt.fade,   k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  flowT += cfg.tScale * dt;
+
+  ctx.fillStyle = `rgba(10,10,10,${cfg.fade.toFixed(3)})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const active = Math.round(cfg.count);
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  ctx.lineCap = 'round';
+
+  particles.forEach((p, i) => {
+    if (i >= active) return;
+
+    p.age++;
+    if (p.age > p.maxAge) {
+      p.x = Math.random() * W; p.y = Math.random() * H;
+      p.hist = []; p.age = 0;
+      p.maxAge = 50 + Math.floor(Math.random() * 70);
+      return;
+    }
+
+    const a   = angle(p.x, p.y);
+    const spd = cfg.speed * (0.7 + 0.6 * (p.age / p.maxAge));
+    const nx  = (p.x + Math.cos(a) * spd * dt + W) % W;
+    const ny  = (p.y + Math.sin(a) * spd * dt + H) % H;
+
+    // Save history
+    p.hist.push({ x: p.x, y: p.y });
+    if (p.hist.length > HISTORY) p.hist.shift();
+
+    const life = p.age / p.maxAge;
+
+    // Draw streak from history to current
+    if (p.hist.length >= 2) {
+      for (let h = 1; h < p.hist.length; h++) {
+        const t     = h / p.hist.length;
+        const alpha = Math.sin(life * Math.PI) * t * 0.9;
+        const lw    = 1.0 + t * 1.6;
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(2)})`;
+        ctx.lineWidth   = lw;
+        ctx.beginPath();
+        ctx.moveTo(p.hist[h-1].x, p.hist[h-1].y);
+        ctx.lineTo(p.hist[h].x,   p.hist[h].y);
+        ctx.stroke();
+      }
+      // Head dot (brightest point)
+      const headAlpha = Math.sin(life * Math.PI) * 0.95;
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${headAlpha.toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    p.x = nx; p.y = ny;
+  });
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+resize(); requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

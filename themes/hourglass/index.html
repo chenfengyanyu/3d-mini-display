@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hourglass — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { rate: 28, speed: 260, r: 255, g:  70, b:  50 },
+  waiting: { rate:  8, speed: 130, r: 255, g: 195, b:  35 },
+  idle:    { rate:  0, speed:   0, r:  45, g: 195, b:  90 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+let grains   = [];
+let spawnAcc = 0;
+let lastTs   = 0;
+
+function spawnGrain(cx, mid, neckW) {
+  grains.push({
+    x: cx + (Math.random() - 0.5) * neckW,
+    y: mid,
+    vx: (Math.random() - 0.5) * 8,
+    vy: cfg.speed * (0.5 + Math.random() * 0.5),
+    alpha: 0.9 + Math.random() * 0.1,
+    size: 2 + Math.random() * 1.5,
+  });
+}
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.rate  = lerp(cfg.rate,  tgt.rate,  k);
+  cfg.speed = lerp(cfg.speed, tgt.speed, k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx    = W / 2, cy = H / 2;
+  const size  = Math.min(W, H) * 0.4;
+  const hW    = size * 0.55;      // half-width at top/bottom
+  const neckW = size * 0.04;      // half-width at neck
+  const top   = cy - size * 0.52;
+  const bot   = cy + size * 0.52;
+  const mid   = cy;               // neck Y
+  const cr    = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+  const col   = `rgb(${cr},${cg},${cb})`;
+
+  // ── Hourglass frame ──────────────────────────────
+  ctx.shadowColor = col;
+  ctx.shadowBlur  = 10;
+  ctx.strokeStyle = col;
+  ctx.lineWidth   = 1.8;
+
+  // Upper chamber
+  ctx.beginPath();
+  ctx.moveTo(cx - hW, top);
+  ctx.lineTo(cx + hW, top);
+  ctx.lineTo(cx + neckW, mid);
+  ctx.lineTo(cx - neckW, mid);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Lower chamber
+  ctx.beginPath();
+  ctx.moveTo(cx - neckW, mid);
+  ctx.lineTo(cx + neckW, mid);
+  ctx.lineTo(cx + hW, bot);
+  ctx.lineTo(cx - hW, bot);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Top / bottom caps
+  ctx.beginPath(); ctx.moveTo(cx - hW - 8, top - 8); ctx.lineTo(cx + hW + 8, top - 8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - hW - 8, bot + 8); ctx.lineTo(cx + hW + 8, bot + 8); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // ── Spawn grains ─────────────────────────────────
+  if (cfg.rate > 0.5) {
+    spawnAcc += cfg.rate * dt;
+    while (spawnAcc >= 1) {
+      spawnGrain(cx, mid, neckW * 1.5);
+      spawnAcc -= 1;
+    }
+  }
+
+  // ── Update + draw grains ─────────────────────────
+  grains = grains.filter(g => {
+    g.vy = lerp(g.vy, cfg.speed, k * 0.3);
+    g.y += g.vy * dt;
+    g.x += g.vx * dt;
+
+    // Spread in lower chamber
+    const lowerT = (g.y - mid) / (bot - mid);
+    if (lowerT > 0) {
+      const maxX = cx + neckW + lowerT * (hW - neckW) * 0.8;
+      const minX = cx - neckW - lowerT * (hW - neckW) * 0.8;
+      g.x = Math.max(minX, Math.min(maxX, g.x));
+      g.vx *= 0.92;
+    }
+
+    if (g.y > bot - 4) {
+      // Settle: grain lands at bottom
+      return false;
+    }
+
+    ctx.shadowColor = col;
+    ctx.shadowBlur  = 3;
+    ctx.fillStyle   = `rgba(${cr},${cg},${cb},${g.alpha.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.size, 0, Math.PI * 2);
+    ctx.fill();
+    return true;
+  });
+  ctx.shadowBlur = 0;
+
+  // ── Idle: glowing settled sand at bottom ─────────
+  if (cfg.rate < 1) {
+    const glow = ctx.createRadialGradient(cx, bot - 10, 0, cx, bot, hW * 0.7);
+    glow.addColorStop(0,   `rgba(${cr},${cg},${cb},0.35)`);
+    glow.addColorStop(0.5, `rgba(${cr},${cg},${cb},0.10)`);
+    glow.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - hW, bot - 20, hW * 2, 25);
+  }
+
+  // ── Neck glow ─────────────────────────────────────
+  if (cfg.rate > 2) {
+    const ng = ctx.createRadialGradient(cx, mid, 0, cx, mid, neckW * 8);
+    ng.addColorStop(0,   `rgba(${cr},${cg},${cb},0.30)`);
+    ng.addColorStop(1,   `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = ng;
+    ctx.beginPath(); ctx.arc(cx, mid, neckW * 8, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

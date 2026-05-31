@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cube — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+const CFGS = {
+  busy:    { rx: 1.80, ry: 2.60, rz: 0.90, r: 255, g:  59, b:  48 },
+  waiting: { rx: 0.35, ry: 0.55, rz: 0.00, r: 255, g: 204, b:   0 },
+  idle:    { rx: 0.08, ry: 0.12, rz: 0.00, r:  52, g: 199, b:  89 },
+};
+let cfg = { ...CFGS.idle }, tgt = { ...CFGS.idle };
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// Unit cube vertices
+const VERTS = [
+  [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+  [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1],
+];
+const EDGES = [
+  [0,1],[1,2],[2,3],[3,0],  // back face
+  [4,5],[5,6],[6,7],[7,4],  // front face
+  [0,4],[1,5],[2,6],[3,7],  // connecting edges
+];
+
+// Rotation helpers
+function rx(v, a) { return [v[0], v[1]*Math.cos(a)-v[2]*Math.sin(a), v[1]*Math.sin(a)+v[2]*Math.cos(a)]; }
+function ry(v, a) { return [v[0]*Math.cos(a)+v[2]*Math.sin(a), v[1], -v[0]*Math.sin(a)+v[2]*Math.cos(a)]; }
+function rz(v, a) { return [v[0]*Math.cos(a)-v[1]*Math.sin(a), v[0]*Math.sin(a)+v[1]*Math.cos(a), v[2]]; }
+
+let ax = 0, ay = 0, az = 0;
+let lastTs = 0;
+
+// Ghost frames for busy trail
+const GHOSTS = 5;
+let ghostAngles = Array.from({ length: GHOSTS }, () => ({ ax: 0, ay: 0, az: 0 }));
+
+function project(v, size, cx, cy) {
+  const fov = 4.5;
+  const z = v[2] + fov;
+  return { x: cx + (v[0] / z) * size, y: cy + (v[1] / z) * size, z: v[2] };
+}
+
+function drawCube(angX, angY, angZ, size, cx, cy, cr, cg, cb, alpha) {
+  const pts = VERTS.map(v => {
+    let p = rx(v, angX);
+    p = ry(p, angY);
+    p = rz(p, angZ);
+    return project(p, size, cx, cy);
+  });
+
+  EDGES.forEach(([a, b]) => {
+    const pa = pts[a], pb = pts[b];
+    const depth = (pa.z + pb.z) * 0.5;
+    const depthAlpha = (depth + 1.5) / 3.0;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(alpha * (0.4 + depthAlpha * 0.6)).toFixed(2)})`;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  });
+}
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  const k = 1 - Math.pow(0.04, dt);
+  cfg.rx = lerp(cfg.rx, tgt.rx, k);
+  cfg.ry = lerp(cfg.ry, tgt.ry, k);
+  cfg.rz = lerp(cfg.rz, tgt.rz, k);
+  cfg.r = lerp(cfg.r, tgt.r, k); cfg.g = lerp(cfg.g, tgt.g, k); cfg.b = lerp(cfg.b, tgt.b, k);
+
+  ax += cfg.rx * dt; ay += cfg.ry * dt; az += cfg.rz * dt;
+
+  // Shift ghost trail
+  for (let i = GHOSTS - 1; i > 0; i--) {
+    ghostAngles[i] = { ...ghostAngles[i - 1] };
+  }
+  ghostAngles[0] = { ax, ay, az };
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const size = Math.min(W, H) * 0.40;
+  const cr = Math.round(cfg.r), cg = Math.round(cfg.g), cb = Math.round(cfg.b);
+
+  // Ambient glow
+  ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+  ctx.shadowBlur  = 0;
+
+  // Ghost trail (only for fast rotation states)
+  const speed = Math.sqrt(cfg.rx**2 + cfg.ry**2 + cfg.rz**2);
+  if (speed > 0.5) {
+    for (let i = GHOSTS - 1; i >= 1; i--) {
+      const g = ghostAngles[i];
+      const ghostAlpha = (1 - i / GHOSTS) * 0.25 * (speed / 3);
+      drawCube(g.ax, g.ay, g.az, size, cx, cy, cr, cg, cb, ghostAlpha);
+    }
+  }
+
+  // Glow
+  ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+  ctx.shadowBlur  = 12;
+
+  // Main cube
+  drawCube(ax, ay, az, size, cx, cy, cr, cg, cb, 1.0);
+  ctx.shadowBlur = 0;
+
+  // Vertex dots
+  VERTS.forEach(v => {
+    let p = rx(v, ax); p = ry(p, ay); p = rz(p, az);
+    const pp = project(p, size, cx, cy);
+    const a  = (pp.z + 1.5) / 3.0;
+    ctx.fillStyle = `rgba(255,255,255,${(a * 0.7).toFixed(2)})`;
+    ctx.beginPath(); ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() { try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {} }
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+requestAnimationFrame(animate); setState('idle', null);
+</script>
+</body>
+</html>

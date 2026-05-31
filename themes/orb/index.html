@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orb — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── State configs ─────────────────────────────────
+const CFGS = {
+  busy:    { speed: 2.6,  maxScale: 1.55, r: 255, g:  59, b:  48, rings: 7 },
+  waiting: { speed: 1.05, maxScale: 1.18, r: 255, g: 204, b:   0, rings: 5 },
+  idle:    { speed: 0.38, maxScale: 1.07, r:  52, g: 199, b:  89, rings: 4 },
+};
+
+let cfg = { ...CFGS.idle };
+let tgt = { ...CFGS.idle };
+let t   = 0;
+let lastTs = 0;
+
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  // Smooth lerp toward target
+  const k = 1 - Math.pow(0.03, dt);
+  cfg.speed    = lerp(cfg.speed,    tgt.speed,    k);
+  cfg.maxScale = lerp(cfg.maxScale, tgt.maxScale, k);
+  cfg.rings    = lerp(cfg.rings,    tgt.rings,    k);
+  cfg.r = lerp(cfg.r, tgt.r, k);
+  cfg.g = lerp(cfg.g, tgt.g, k);
+  cfg.b = lerp(cfg.b, tgt.b, k);
+
+  t += cfg.speed * dt;
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx     = W / 2;
+  const cy     = H / 2;
+  const baseR  = Math.min(W, H) * 0.10;
+  const cr = cfg.r, cg = cfg.g, cb = cfg.b;
+  const rings  = Math.round(cfg.rings);
+
+  // Draw rings from outer to inner (each with phase offset for ripple)
+  for (let i = rings; i >= 1; i--) {
+    const phaseOff = (rings - i) * 0.55;
+    const s = 1.0 + (cfg.maxScale - 1.0) * 0.5 * (1 - Math.cos((t - phaseOff) * Math.PI));
+    const rBase = baseR * (1 + (i - 1) * 0.72);
+    const r     = rBase * s;
+    const alpha = (0.11 - (i - 1) * 0.008) * Math.max(0.4, s);
+
+    // Radial gradient for each ring
+    const grad = ctx.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 1.2);
+    grad.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha * 2.5})`);
+    grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // Core glow (radial gradient, large)
+  const coreScale = 1.0 + (cfg.maxScale - 1.0) * 0.5 * (1 - Math.cos(t * Math.PI));
+  const coreR     = baseR * 2.2 * coreScale;
+  const glowGrad  = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+  glowGrad.addColorStop(0,    `rgba(${cr},${cg},${cb},0.55)`);
+  glowGrad.addColorStop(0.35, `rgba(${cr},${cg},${cb},0.18)`);
+  glowGrad.addColorStop(0.70, `rgba(${cr},${cg},${cb},0.05)`);
+  glowGrad.addColorStop(1,    `rgba(${cr},${cg},${cb},0.00)`);
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+  ctx.fillStyle = glowGrad;
+  ctx.fill();
+
+  // Solid core
+  const solidR = baseR * 0.28 * coreScale;
+  ctx.shadowColor = `rgb(${cr},${cg},${cb})`;
+  ctx.shadowBlur  = 20;
+  ctx.beginPath();
+  ctx.arc(cx, cy, solidR, 0, Math.PI * 2);
+  ctx.fillStyle = `rgb(${Math.round(cr)},${Math.round(cg)},${Math.round(cb)})`;
+  ctx.fill();
+
+  // Bright center point
+  ctx.shadowBlur = 30;
+  ctx.beginPath();
+  ctx.arc(cx, cy, solidR * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,255,0.85)`;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Outer ambient bloom (very large, very faint)
+  const bloomR = Math.min(W, H) * 0.65;
+  const bloom  = ctx.createRadialGradient(cx, cy, 0, cx, cy, bloomR);
+  bloom.addColorStop(0, `rgba(${cr},${cg},${cb},0.04)`);
+  bloom.addColorStop(1, `rgba(${cr},${cg},${cb},0.00)`);
+  ctx.beginPath();
+  ctx.arc(cx, cy, bloomR, 0, Math.PI * 2);
+  ctx.fillStyle = bloom;
+  ctx.fill();
+}
+
+// ── State machine ─────────────────────────────────
+
+let lastState = null;
+function applyState(s) { tgt = { ...CFGS[s] }; }
+function setState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  applyState(s);
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) setState(d.state); });
+async function poll() {
+  try { const d = await (await fetch('/api/status')).json(); if (d?.state) setState(d.state); } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 1000); poll(); }
+
+requestAnimationFrame(animate);
+setState('idle', null);
+</script>
+</body>
+</html>
