@@ -246,6 +246,7 @@
     { id: 'hourglass',     name: '数字沙漏', icon: '⏳' },
     { id: 'lava',          name: '熔岩灯',  icon: '🫧' },
     { id: 'starfield',     name: '星空',    icon: '🌠' },
+    { id: 'moodface',     name: '表情脸',   icon: '😶' },
   ];
 
   // ── State ─────────────────────────────────────────
@@ -265,6 +266,13 @@
     drawerOpen = !drawerOpen;
     drawer.classList.toggle('open', drawerOpen);
     toggleBtn.classList.toggle('open', drawerOpen);
+    // Scroll active item into view after transition starts
+    if (drawerOpen) {
+      requestAnimationFrame(() => {
+        const active = themeList.querySelector('.theme-card.active');
+        if (active) active.scrollIntoView({ block: 'nearest' });
+      });
+    }
   });
 
   document.addEventListener('click', e => {

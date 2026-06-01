@@ -38,7 +38,7 @@ bash start.sh
 bash stop.sh
 ```
 
-### 16 个动画主题
+### 17 个动画主题
 
 | 图标 | 主题 | 视觉效果 |
 |------|------|---------|
@@ -58,6 +58,7 @@ bash stop.sh
 | ⏳ | 数字沙漏 | 粒子沙流物理模拟 |
 | 🫧 | 熔岩灯 | Metaball 融合流动色块 |
 | 🌠 | 星空 | 星云 + 流星 + 红灯时极速跃迁 |
+| 😶 | 表情脸 | 抽象艺术脸：忙碌红眼生气、等待无奈问号、空闲开心笑容 |
 
 ### 工作原理
 
@@ -109,7 +110,7 @@ MyBetterDisplay/
 │   ├── monitor.js        # HTTP 监控服务（port 4242）
 │   ├── set-state.sh      # Hook 脚本（由 Claude Code 调用）
 │   └── install-hooks.sh  # 向 settings.json 注入 hooks
-└── themes/               # 14 个动画主题（每个独立 HTML 文件）
+└── themes/               # 17 个动画主题（每个独立 HTML 文件）
 ```
 
 ## 系统要求

@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mood Face — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+// ── Palette ──────────────────────────────────────
+const PAL = {
+  busy:    { r: 255, g:  48, b:  48 },
+  waiting: { r: 255, g: 200, b:   0 },
+  idle:    { r:  50, g: 210, b:  88 },
+};
+let cR = 50, cG = 210, cB = 88;
+let tR = 50, tG = 210, tB = 88;
+let state = 'idle', lastState = null;
+
+// ── Shared anim ──────────────────────────────────
+let t = 0, lastTs = 0;
+
+// Brow spring (physical slam on busy entry)
+let browPos = 0, browVel = 0, browTarget = 0;
+
+// Busy
+let sX = 0, sY = 0;
+let steam = [];                           // rising steam puffs
+
+// Waiting
+let swayA = 0, lookX = 0;
+let sweatT = 0;                           // 0→1.2 cycle for sweat drop
+let dotPhase = 0;                         // "..." animation phase
+
+// Idle
+let bounceY = 0;
+let blinkT  = 0, blinkV = 0;             // blink
+let winkT   = 0, winkV  = 0, winkSide = 0;  // wink
+let sparkles = [];
+
+// ── Helpers ──────────────────────────────────────
+const lerp = (a, b, k) => a + (b - a) * k;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const glow  = (col, sz) => { ctx.shadowColor = col; ctx.shadowBlur = sz; };
+const noGlow = () => { ctx.shadowBlur = 0; };
+
+// ── State switch ─────────────────────────────────
+function setState(s) {
+  if (s === state) return;
+  state = s;
+  const p = PAL[s];
+  tR = p.r; tG = p.g; tB = p.b;
+  // Reset per-state vars
+  blinkT = 0; blinkV = 0; winkT = 0; winkV = 0;
+  sweatT = 0; dotPhase = 0;
+  steam  = [];
+  sparkles = [];
+  // Spring target
+  browTarget = s === 'busy' ? -1.0 : s === 'waiting' ? 0.3 : 0;
+  // Impulse the spring for snappy entry
+  if (s === 'busy') browVel = -8;
+}
+
+// ── Main loop ────────────────────────────────────
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts; t += dt;
+
+  // Color lerp
+  const ck = 1 - Math.pow(0.01, dt);
+  cR = lerp(cR, tR, ck); cG = lerp(cG, tG, ck); cB = lerp(cB, tB, ck);
+
+  // Brow spring (shared)
+  const bf = (browTarget - browPos) * 260 - browVel * 20;
+  browVel += bf * dt; browPos += browVel * dt;
+  browPos = clamp(browPos, -1.3, 0.6);
+
+  // ── Per-state ──
+  if (state === 'busy') {
+    const rage = 0.55 + 0.45 * Math.abs(Math.sin(t * 3.8));
+    sX = Math.sin(t * 34) * 6.5 * rage;
+    sY = Math.cos(t * 28) * 3.8 * rage;
+    // Spawn steam puffs
+    if (Math.random() < dt * 4) {
+      steam.push({ x: (Math.random() - 0.5) * 0.5, y: 0, vy: -(0.9 + Math.random() * 0.6),
+                   vx: (Math.random() - 0.5) * 0.35, r: 0.12 + Math.random() * 0.12, a: 0.72 });
+    }
+    steam = steam.filter(p => {
+      p.y += p.vy * dt; p.x += p.vx * dt;
+      p.r += dt * 0.12; p.a -= dt * 0.55;
+      return p.a > 0;
+    });
+
+  } else if (state === 'waiting') {
+    sX = Math.sin(t * 0.75) * 2.8;
+    swayA  = Math.sin(t * 0.95) * 0.044;
+    lookX  = Math.sin(t * 0.48) * 5.8;
+    sweatT = (sweatT + dt * 0.38) % 1.4;
+    dotPhase += dt * 1.1;
+
+  } else { // idle
+    sX = 0; sY = 0; swayA = 0;
+    bounceY = Math.sin(t * 2.2) * 5.5;
+    // Blink every ~3.5 s
+    blinkT += dt;
+    if (blinkT > 3.5) {
+      blinkV = Math.sin(((blinkT - 3.5) / 0.15) * Math.PI);
+      if (blinkT > 3.65) blinkT = 0;
+    } else blinkV = 0;
+    // Wink every ~8 s
+    winkT += dt;
+    if (winkT > 8.0) {
+      winkV = Math.sin(((winkT - 8.0) / 0.22) * Math.PI);
+      if (winkT > 8.22) { winkT = 0; winkSide = 1 - winkSide; }
+    } else winkV = 0;
+    // Sparkle particles
+    if (Math.random() < dt * 3) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      sparkles.push({ x: side * (0.28 + Math.random() * 0.18), y: 0.15 + Math.random() * 0.35,
+                      vx: side * (0.08 + Math.random() * 0.12), vy: -(0.28 + Math.random() * 0.32),
+                      life: 1.0, sz: 0.025 + Math.random() * 0.03 });
+    }
+    sparkles = sparkles.filter(p => {
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      return p.life > 0;
+    });
+  }
+
+  draw();
+}
+
+// ── Render ───────────────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const u  = Math.min(W, H) * 0.08;
+  const cx = W / 2, cy = H / 2;
+  const cr = Math.round(cR), cg = Math.round(cG), cb = Math.round(cB);
+  const col = `rgb(${cr},${cg},${cb})`;
+  const a   = v => `rgba(${cr},${cg},${cb},${v})`;
+
+  // Background bloom
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, u * 9.5);
+  bg.addColorStop(0, a(0.075));
+  bg.addColorStop(1, a(0));
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(cx, cy, u * 9.5, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save();
+  if (state === 'waiting') {
+    ctx.translate(cx, cy); ctx.rotate(swayA); ctx.translate(-cx, -cy);
+  }
+  ctx.translate(sX, sY + (state === 'idle' ? bounceY : 0));
+
+  drawFace(cx, cy, u, col, a);
+  ctx.restore();
+}
+
+// ── Face ─────────────────────────────────────────
+function drawFace(cx, cy, u, col, a) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const lw = u * 0.40;
+
+  const eyeY   = cy - u * 0.38;
+  const eyeX   = u * 2.35;
+  const browY  = eyeY - u * 1.78;
+  const noseY  = cy + u * 0.95;
+  const mouthY = cy + u * 2.42;
+
+  // Steam (behind everything)
+  if (state === 'busy') {
+    steam.forEach(p => {
+      const sx = cx + p.x * u * 5;
+      const sy = (cy - u * 3.5) + p.y * u * 3.5;
+      ctx.strokeStyle = a(p.a * 0.45);
+      ctx.lineWidth = 1.5;
+      glow(col, u * 0.6);
+      ctx.beginPath(); ctx.arc(sx, sy, p.r * u * 4.5, 0, Math.PI * 2); ctx.stroke();
+    });
+    noGlow();
+  }
+
+  // ── Eyebrows ──
+  const bo = browPos * u * 0.55;   // brow spring offset (negative = slammed down)
+  if (state === 'idle') {
+    eBrow_happy(cx - eyeX, browY + bo, u, lw, col);
+    eBrow_happy(cx + eyeX, browY + bo, u, lw, col);
+  } else if (state === 'busy') {
+    eBrow_angry(cx - eyeX, browY + bo, u, lw, col, false);
+    eBrow_angry(cx + eyeX, browY + bo, u, lw, col, true);
+  } else {
+    eBrow_waitL(cx - eyeX, browY, u, lw, col);
+    eBrow_waitR(cx + eyeX, browY, u, lw, col);
+  }
+
+  // ── Eyes ──
+  if (state === 'idle') {
+    const lClose = clamp(blinkV + (winkSide === 0 ? winkV : 0), 0, 1);
+    const rClose = clamp(blinkV + (winkSide === 1 ? winkV : 0), 0, 1);
+    eEye_happy(cx - eyeX, eyeY, u, lw, col, a, lClose);
+    eEye_happy(cx + eyeX, eyeY, u, lw, col, a, rClose);
+  } else if (state === 'busy') {
+    eEye_angry(cx - eyeX, eyeY, u, lw, col, a, false);
+    eEye_angry(cx + eyeX, eyeY, u, lw, col, a, true);
+  } else {
+    eEye_wait(cx - eyeX, eyeY, u, lw, col, a, false);
+    eEye_wait(cx + eyeX, eyeY, u, lw, col, a, true);
+  }
+
+  // ── Nose (small, subtle) ──
+  ctx.strokeStyle = a(0.38);
+  ctx.lineWidth = lw * 0.5;
+  glow(col, lw * 0.6);
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 0.28, noseY);
+  ctx.quadraticCurveTo(cx + u * 0.52, noseY + u * 0.52, cx + u * 0.25, noseY);
+  ctx.stroke(); noGlow();
+
+  // ── Mouth ──
+  if (state === 'idle')  eMouth_happy(cx, mouthY, u, lw, col, a);
+  if (state === 'busy')  eMouth_angry(cx, mouthY, u, lw, col, a);
+  if (state === 'waiting') eMouth_wait(cx, mouthY, u, lw, col, a);
+
+  // ── Extras ──
+  if (state === 'busy')    extras_anger(cx, cy, u, col, a);
+  if (state === 'waiting') extras_sweat(cx, cy, u, col, a);
+  if (state === 'waiting') extras_qmark(cx + u * 3.8, cy - u * 1.9, u, col, a);
+  if (state === 'waiting') extras_dots(cx, mouthY + u * 1.4, u, col, a);
+  if (state === 'idle')    extras_sparkle(cx, cy, u, col, a);
+}
+
+// ═══════════════════════════════════════════════
+//  EYES
+// ═══════════════════════════════════════════════
+
+// Happy squint arch ^
+function eEye_happy(x, y, u, lw, col, a, close) {
+  const w = u * 1.2, h = u * 1.02 * (1 - close * 0.96);
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  glow(col, lw * 2.8);
+  ctx.beginPath();
+  ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - h, x + w, y);
+  ctx.stroke();
+  // Tiny ★ sparkle inside eye (only when open)
+  if (close < 0.4) {
+    ctx.fillStyle = a(0.92);
+    const sx = x + u * 0.38, sy = y - h * 0.58;
+    ctx.beginPath(); ctx.arc(sx, sy, u * 0.11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = a(0.5);
+    ctx.beginPath(); ctx.arc(sx + u * 0.22, sy - u * 0.08, u * 0.06, 0, Math.PI * 2); ctx.fill();
+  }
+  noGlow();
+}
+
+// Angry wide-open stare with rage veins
+function eEye_angry(x, y, u, lw, col, a, isRight) {
+  const pulse = 1 + Math.sin(t * 17) * 0.09;
+  const r = u * 1.02 * pulse;
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  glow(col, lw * 5.5);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  // Dilated rage-pupil
+  const pAlpha = 0.22 + 0.2 * Math.abs(Math.sin(t * 11));
+  ctx.fillStyle = a(pAlpha);
+  ctx.beginPath(); ctx.arc(x, y, r * 0.6, 0, Math.PI * 2); ctx.fill();
+  // Rage veins shooting outward
+  const vDirs = isRight
+    ? [[0.7, -0.25], [1.05, 0.5],  [0.3, -1.0]]
+    : [[-0.7, -0.25], [-1.05, 0.5], [-0.3, -1.0]];
+  vDirs.forEach(([dx, dy], i) => {
+    const flicker = Math.sin(t * 13 + i * 2.7) > 0 ? 0.65 : 0.22;
+    ctx.strokeStyle = a(flicker); ctx.lineWidth = lw * 0.30;
+    glow(col, lw * 1.2);
+    ctx.beginPath();
+    ctx.moveTo(x + dx * r * 0.9, y + dy * r * 0.9);
+    ctx.lineTo(x + dx * r * 1.7, y + dy * r * 1.7);
+    ctx.stroke();
+  });
+  noGlow();
+}
+
+// Waiting: round eyes, wandering pupil, right eye slightly tired
+function eEye_wait(x, y, u, lw, col, a, isRight) {
+  const r = u * 0.96;
+  const offY = isRight ? u * 0.1 : 0; // right eye dips slightly — tired look
+  ctx.strokeStyle = col; ctx.lineWidth = lw * (isRight ? 0.78 : 0.90);
+  glow(col, lw * 2.2);
+  ctx.beginPath(); ctx.arc(x, y + offY, r, 0, Math.PI * 2); ctx.stroke();
+  // Wandering pupil
+  const px = clamp(x + lookX * 0.48, x - r * 0.55, x + r * 0.55);
+  ctx.fillStyle = a(0.62);
+  ctx.beginPath(); ctx.arc(px, y + offY + u * 0.08, r * 0.36, 0, Math.PI * 2); ctx.fill();
+  noGlow();
+}
+
+// ═══════════════════════════════════════════════
+//  EYEBROWS
+// ═══════════════════════════════════════════════
+
+function eBrow_happy(x, y, u, lw, col) {
+  const w = u * 1.12, h = u * 0.46;
+  ctx.strokeStyle = col; ctx.lineWidth = lw * 0.70;
+  glow(col, lw);
+  ctx.beginPath();
+  ctx.moveTo(x - w, y + h); ctx.quadraticCurveTo(x, y - h * 0.38, x + w, y + h);
+  ctx.stroke(); noGlow();
+}
+
+function eBrow_angry(x, y, u, lw, col, isRight) {
+  // Slams inward — V-shape, thickened by the spring fury
+  const fury = 1.0 + Math.abs(Math.sin(t * 7.5)) * 0.5;
+  const w = u * 1.22;
+  ctx.strokeStyle = col; ctx.lineWidth = lw * fury * 0.88;
+  glow(col, lw * 6);
+  ctx.beginPath();
+  if (!isRight) {
+    ctx.moveTo(x - w, y - u * 0.44); // outer edge raised
+    ctx.lineTo(x + w, y + u * 0.56); // inner edge (nose side) slammed down
+  } else {
+    ctx.moveTo(x - w, y + u * 0.56);
+    ctx.lineTo(x + w, y - u * 0.44);
+  }
+  ctx.stroke(); noGlow();
+}
+
+function eBrow_waitL(x, y, u, lw, col) {
+  // Left brow arched dramatically high (one brow raised)
+  ctx.strokeStyle = col; ctx.lineWidth = lw * 0.70;
+  glow(col, lw);
+  ctx.beginPath();
+  ctx.moveTo(x - u * 1.08, y + u * 0.72);
+  ctx.quadraticCurveTo(x, y - u * 0.78, x + u * 1.08, y + u * 0.28);
+  ctx.stroke(); noGlow();
+}
+
+function eBrow_waitR(x, y, u, lw, col) {
+  // Right brow flat / slightly sagging
+  ctx.strokeStyle = col; ctx.lineWidth = lw * 0.70;
+  glow(col, lw);
+  ctx.beginPath();
+  ctx.moveTo(x - u * 1.08, y + u * 0.08);
+  ctx.quadraticCurveTo(x, y + u * 0.22, x + u * 1.08, y + u * 0.48);
+  ctx.stroke(); noGlow();
+}
+
+// ═══════════════════════════════════════════════
+//  MOUTHS
+// ═══════════════════════════════════════════════
+
+function eMouth_happy(x, y, u, lw, col, a) {
+  // Wide goofy grin
+  ctx.strokeStyle = col; ctx.lineWidth = lw;
+  glow(col, lw * 2.8);
+  ctx.beginPath();
+  ctx.moveTo(x - u * 2.45, y - u * 0.38);
+  ctx.quadraticCurveTo(x, y + u * 1.45, x + u * 2.45, y - u * 0.38);
+  ctx.stroke(); noGlow();
+  // Rosy cheeks
+  ctx.fillStyle = a(0.10);
+  ctx.beginPath(); ctx.arc(x - u * 3.45, y - u * 0.08, u * 0.98, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + u * 3.45, y - u * 0.08, u * 0.98, 0, Math.PI * 2); ctx.fill();
+  // Smile dimple marks
+  ctx.strokeStyle = a(0.30); ctx.lineWidth = lw * 0.38;
+  glow(col, lw * 0.5);
+  ctx.beginPath(); ctx.arc(x - u * 2.38, y + u * 0.08, u * 0.46, 0.12 * Math.PI, 0.58 * Math.PI, true);  ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + u * 2.38, y + u * 0.08, u * 0.46, 0.42 * Math.PI, 0.88 * Math.PI, false); ctx.stroke();
+  noGlow();
+}
+
+function eMouth_angry(x, y, u, lw, col, a) {
+  // Clenched open mouth — top straight, bottom curved, teeth inside
+  const shk = Math.sin(t * 24) * u * 0.15;
+  const mW = u * 2.58, mH = u * 0.95;
+  ctx.strokeStyle = col; ctx.lineWidth = lw * 0.92;
+  glow(col, lw * 3.5);
+  // Top jaw (straight line, shakes)
+  ctx.beginPath();
+  ctx.moveTo(x - mW, y + shk * 0.3); ctx.lineTo(x + mW, y + shk * 0.3);
+  ctx.stroke();
+  // Bottom jaw (curved, opposite shake)
+  ctx.beginPath();
+  ctx.moveTo(x - mW, y + shk * 0.3);
+  ctx.quadraticCurveTo(x, y + mH - shk * 0.5, x + mW, y + shk * 0.3);
+  ctx.stroke(); noGlow();
+  // Teeth — vertical dividers
+  ctx.lineWidth = lw * 0.32; ctx.strokeStyle = a(0.58);
+  glow(col, lw * 0.5);
+  const slots = 5, tw = (mW * 2) / slots;
+  for (let i = 1; i < slots; i++) {
+    const tx = x - mW + i * tw;
+    const th = mH * (0.62 + 0.22 * Math.sin(t * 22 + i * 1.3));
+    ctx.beginPath(); ctx.moveTo(tx, y + shk * 0.3); ctx.lineTo(tx, y + shk * 0.3 + th); ctx.stroke();
+  }
+  noGlow();
+}
+
+function eMouth_wait(x, y, u, lw, col, a) {
+  // Slight frown / helpless flat line — quivers nervously
+  const q = Math.sin(t * 19) * u * 0.065;
+  ctx.strokeStyle = col; ctx.lineWidth = lw * 0.82;
+  glow(col, lw * 1.2);
+  ctx.beginPath();
+  ctx.moveTo(x - u * 2.05, y + u * 0.18);
+  ctx.quadraticCurveTo(x, y + u * 0.58 + q, x + u * 2.05, y + u * 0.18);
+  ctx.stroke(); noGlow();
+}
+
+// ═══════════════════════════════════════════════
+//  EXTRAS
+// ═══════════════════════════════════════════════
+
+// Angry: !! marks on sides + steam
+function extras_anger(cx, cy, u, col, a) {
+  const marks = [
+    { x: cx - u * 5.0, y: cy - u * 1.6, rot: -0.30 },
+    { x: cx + u * 5.0, y: cy - u * 1.6, rot:  0.30 },
+    { x: cx - u * 5.6, y: cy + u * 1.1, rot: -0.50 },
+    { x: cx + u * 5.6, y: cy + u * 1.1, rot:  0.50 },
+  ];
+  marks.forEach((m, i) => {
+    const f = 0.52 + 0.48 * Math.abs(Math.sin(t * 10.5 + i * 2.0));
+    ctx.save();
+    ctx.translate(m.x, m.y); ctx.rotate(m.rot);
+    ctx.strokeStyle = a(f); ctx.fillStyle = a(f);
+    ctx.lineWidth = u * 0.29; ctx.lineCap = 'round';
+    glow(col, u * 1.0);
+    ctx.beginPath(); ctx.moveTo(0, -u); ctx.lineTo(0, u * 0.2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, u * 0.78, u * 0.19, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+  noGlow();
+}
+
+// Waiting: animated sweat drop
+function extras_sweat(cx, cy, u, col, a) {
+  if (sweatT >= 1.25) return;
+  const r  = u * 0.30;
+  const sx = cx + u * 1.85;
+  const sy = (cy - u * 2.55) + sweatT * u * 4.2;
+  const op = Math.min(1, (1.25 - sweatT) * 2.2) * 0.82;
+  glow(col, u * 0.9);
+  ctx.fillStyle = a(op);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - r * 1.4);
+  ctx.quadraticCurveTo(sx + r, sy + r * 0.35, sx, sy + r);
+  ctx.quadraticCurveTo(sx - r, sy + r * 0.35, sx, sy - r * 1.4);
+  ctx.fill(); noGlow();
+}
+
+// Waiting: floating ? mark
+function extras_qmark(x, y, u, col, a) {
+  const yOff = Math.sin(t * 1.75) * u * 0.72;
+  const op   = 0.60 + 0.40 * Math.abs(Math.sin(t * 2.1));
+  const yy   = y + yOff;
+  ctx.strokeStyle = a(op); ctx.fillStyle = a(op);
+  ctx.lineWidth = u * 0.34; ctx.lineCap = 'round';
+  glow(col, u * 1.9);
+  ctx.beginPath(); ctx.arc(x, yy, u * 0.70, Math.PI + 0.42, 0.10, false); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + u * 0.64, yy + u * 0.10);
+  ctx.quadraticCurveTo(x + u * 0.50, yy + u * 0.95, x, yy + u * 1.12);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, yy + u * 1.90, u * 0.24, 0, Math.PI * 2); ctx.fill();
+  noGlow();
+}
+
+// Waiting: animated "..." ellipsis below mouth
+function extras_dots(x, y, u, col, a) {
+  const r  = u * 0.16;
+  const sp = u * 0.60;
+  for (let i = 0; i < 3; i++) {
+    // Each dot lights up 0.4 s apart
+    const phase  = (dotPhase - i * 0.42) % 1.5;
+    const bright = phase > 0 && phase < 0.6 ? Math.sin((phase / 0.6) * Math.PI) : 0;
+    ctx.fillStyle = a(0.20 + bright * 0.60);
+    glow(col, r * bright * 3);
+    ctx.beginPath(); ctx.arc(x + (i - 1) * sp, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  noGlow();
+}
+
+// Idle: rising sparkle particles
+function extras_sparkle(cx, cy, u, col, a) {
+  sparkles.forEach(p => {
+    const x  = cx + p.x * u * 10;
+    const y  = cy + p.y * u * 10 - (1 - p.life) * u * 3.5;
+    const sz = p.sz * u * 10;
+    const op = p.life * 0.88;
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(t * 2.0 + p.x * 8);
+    ctx.strokeStyle = a(op); ctx.lineWidth = sz * 0.33; ctx.lineCap = 'round';
+    glow(col, sz * 2.2);
+    for (let i = 0; i < 4; i++) {
+      const ang = (i / 4) * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * sz * 0.3, Math.sin(ang) * sz * 0.3);
+      ctx.lineTo(Math.cos(ang) * sz, Math.sin(ang) * sz);
+      ctx.moveTo(-Math.cos(ang) * sz * 0.3, -Math.sin(ang) * sz * 0.3);
+      ctx.lineTo(-Math.cos(ang) * sz, -Math.sin(ang) * sz);
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
+  noGlow();
+}
+
+// ── State wiring ──────────────────────────────────
+function handleState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  setState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+async function poll() {
+  try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+requestAnimationFrame(animate);
+handleState('idle');
+</script>
+</body>
+</html>
