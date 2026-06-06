@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>棱镜幻彩 — Claude Status</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── State presets ─────────────────────────────────────
+const PRESETS = {
+  busy: {
+    rotSpeed:   2.8,   // rad/s
+    nBeams:     10,    // number of light beams (float ok)
+    beamAlpha:  0.72,  // beam opacity at center
+    beamLen:    0.92,  // beam length as fraction of half-diagonal
+    hueOffset:  0,     // rainbow starts at red
+    hueRange:   260,   // hue sweep width
+    saturation: 100,
+    prismR:     255, prismG:  70, prismB:  20,
+    coreGlow:   0.85,
+    shakeAmt:   0.012, // camera shake (fraction of min dim)
+    sparkRate:  8,
+  },
+  waiting: {
+    rotSpeed:   0.75,
+    nBeams:     6,
+    beamAlpha:  0.50,
+    beamLen:    0.80,
+    hueOffset:  32,
+    hueRange:   180,
+    saturation: 90,
+    prismR:     255, prismG: 200, prismB:  40,
+    coreGlow:   0.55,
+    shakeAmt:   0,
+    sparkRate:  1.5,
+  },
+  idle: {
+    rotSpeed:   0.18,
+    nBeams:     3,
+    beamAlpha:  0.30,
+    beamLen:    0.68,
+    hueOffset:  130,
+    hueRange:   110,
+    saturation: 80,
+    prismR:     40, prismG: 220, prismB: 180,
+    coreGlow:   0.28,
+    shakeAmt:   0,
+    sparkRate:  0,
+  },
+};
+
+let curState = 'idle';
+let p = { ...PRESETS.idle };
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function applyLerp(dt) {
+  const tgt = PRESETS[curState];
+  const k = Math.min(dt * 2, 1);
+  for (const key of Object.keys(tgt)) {
+    if (typeof tgt[key] === 'number') p[key] = lerp(p[key], tgt[key], k);
+  }
+}
+
+// ── Prism rotation ────────────────────────────────────
+let rotAngle  = 0;
+let shakeX    = 0;
+let shakeY    = 0;
+let shakeDecay = 0;
+
+// ── Sparkles (busy: glints on beam edges) ─────────────
+const MAX_SP = 80;
+const spx  = new Float32Array(MAX_SP);
+const spy  = new Float32Array(MAX_SP);
+const spvx = new Float32Array(MAX_SP);
+const spvy = new Float32Array(MAX_SP);
+const spl  = new Float32Array(MAX_SP);  // life
+const spml = new Float32Array(MAX_SP);  // max life
+const spHue= new Float32Array(MAX_SP);
+let   spHead = 0;
+let   spAccum = 0;
+
+function spawnSparkle(ox, oy, hue) {
+  const i = spHead++ % MAX_SP;
+  spx[i]   = ox;
+  spy[i]   = oy;
+  const a  = Math.random() * Math.PI * 2;
+  const v  = 40 + Math.random() * 120;
+  spvx[i]  = Math.cos(a) * v;
+  spvy[i]  = Math.sin(a) * v;
+  spl[i]   = 0;
+  spml[i]  = 0.3 + Math.random() * 0.5;
+  spHue[i] = hue;
+}
+
+// ── Draw helpers ──────────────────────────────────────
+function drawBeam(cx, cy, angle, hue, alpha, len) {
+  const hw  = 0.11;   // half angular width (radians)
+  const end = len;
+
+  // Gradient along beam axis
+  const gx  = cx + Math.cos(angle) * end;
+  const gy  = cy + Math.sin(angle) * end;
+  const grd = ctx.createLinearGradient(cx, cy, gx, gy);
+  grd.addColorStop(0,   `hsla(${hue},${~~p.saturation}%,75%,${alpha})`);
+  grd.addColorStop(0.5, `hsla(${hue},${~~p.saturation}%,60%,${alpha * 0.7})`);
+  grd.addColorStop(1,   `hsla(${hue},${~~p.saturation}%,50%,0)`);
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, end, angle - hw, angle + hw);
+  ctx.closePath();
+  ctx.fillStyle = grd;
+  ctx.fill();
+}
+
+function drawPrism(cx, cy, radius) {
+  // Equilateral triangle
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rotAngle);
+
+  const r1 = ~~p.prismR, g1 = ~~p.prismG, b1 = ~~p.prismB;
+
+  // Outer glow
+  ctx.shadowColor = `rgba(${r1},${g1},${b1},0.9)`;
+  ctx.shadowBlur  = radius * 2.5;
+
+  // Faces gradient (glass look)
+  const faceGrd = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+  faceGrd.addColorStop(0,   `rgba(255,255,255,${p.coreGlow * 0.95})`);
+  faceGrd.addColorStop(0.45, `rgba(${r1},${g1},${b1},${p.coreGlow * 0.6})`);
+  faceGrd.addColorStop(1,   `rgba(${r1},${g1},${b1},0.08)`);
+
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    if (i === 0) ctx.moveTo(Math.cos(a) * radius, Math.sin(a) * radius);
+    else         ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+  }
+  ctx.closePath();
+  ctx.fillStyle = faceGrd;
+  ctx.fill();
+
+  // Edge strokes
+  ctx.shadowBlur  = radius * 1.5;
+  ctx.lineWidth   = radius * 0.06;
+  ctx.strokeStyle = `rgba(255,255,255,${p.coreGlow * 0.9})`;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ── Main loop ─────────────────────────────────────────
+let lastTs = 0;
+
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  applyLerp(dt);
+  rotAngle += p.rotSpeed * dt;
+
+  // Camera shake (busy)
+  const maxShake = Math.min(W, H) * p.shakeAmt;
+  if (maxShake > 0) {
+    shakeX = (Math.random() - 0.5) * maxShake * 2;
+    shakeY = (Math.random() - 0.5) * maxShake * 2;
+  } else {
+    shakeX *= 0.85; shakeY *= 0.85;
+  }
+
+  // Clear
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx  = W * 0.5 + shakeX;
+  const cy  = H * 0.5 + shakeY;
+  const dia = Math.sqrt(W * W + H * H) * 0.5;
+  const pRad = Math.min(W, H) * 0.085;
+
+  // ── Beams (screen blend) ──────────────────────────────
+  ctx.globalCompositeOperation = 'screen';
+
+  const nB = Math.round(p.nBeams);
+  const bLen = dia * p.beamLen;
+
+  for (let j = 0; j < nB; j++) {
+    const angle = rotAngle + (j / nB) * Math.PI * 2;
+    const hue   = p.hueOffset + (j / nB) * p.hueRange;
+    drawBeam(cx, cy, angle, hue, p.beamAlpha, bLen);
+
+    // Second softer beam at half angle offset for richer look
+    drawBeam(cx, cy, angle + Math.PI / nB * 0.5, (hue + 20) % 360, p.beamAlpha * 0.4, bLen * 0.75);
+  }
+
+  // ── Sparkles ─────────────────────────────────────────
+  ctx.globalCompositeOperation = 'lighter';
+
+  spAccum += p.sparkRate * dt;
+  while (spAccum > 1) {
+    spAccum -= 1;
+    const j   = ~~(Math.random() * nB);
+    const ang = rotAngle + (j / nB) * Math.PI * 2;
+    const dist = (0.3 + Math.random() * 0.6) * bLen;
+    spawnSparkle(
+      cx + Math.cos(ang) * dist,
+      cy + Math.sin(ang) * dist,
+      p.hueOffset + (j / nB) * p.hueRange
+    );
+  }
+
+  const unit = Math.min(W, H) / 450;
+  for (let i = 0; i < MAX_SP; i++) {
+    if (spml[i] === 0) continue;
+    spl[i] += dt;
+    if (spl[i] >= spml[i]) { spml[i] = 0; continue; }
+    const t = spl[i] / spml[i];
+    const a = (1 - t) * 0.8;
+    spx[i] += spvx[i] * dt;
+    spy[i] += spvy[i] * dt;
+    const r = unit * 1.8 * (1 - t);
+    ctx.beginPath();
+    ctx.arc(spx[i], spy[i], r, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${spHue[i]},100%,75%,${a})`;
+    ctx.fill();
+  }
+
+  // ── Central glow ring ────────────────────────────────
+  ctx.globalCompositeOperation = 'screen';
+  const ring = ctx.createRadialGradient(cx, cy, 0, cx, cy, pRad * 3.5);
+  ring.addColorStop(0,    `rgba(255,255,255,${p.coreGlow * 0.6})`);
+  ring.addColorStop(0.35, `rgba(${~~p.prismR},${~~p.prismG},${~~p.prismB},${p.coreGlow * 0.4})`);
+  ring.addColorStop(1,    'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, pRad * 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = ring;
+  ctx.fill();
+
+  // ── Central prism triangle ────────────────────────────
+  ctx.globalCompositeOperation = 'source-over';
+  drawPrism(cx, cy, pRad);
+}
+
+// ── State ─────────────────────────────────────────────
+function handleState(s) {
+  if (!PRESETS[s] || s === curState) return;
+  curState = s;
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+handleState('idle');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>火焰魂 — Claude Status</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => { resize(); });
+resize();
+
+// ── State config ──────────────────────────────────────
+const PRESETS = {
+  busy:    { count: 180, speed: 130, turb: 45, maxLife: 1.1,
+             coreR: 255, coreG:  60, coreB:   0,
+             midR:  255, midG:  120, midB:  20,
+             glowR: 140, glowG:  20, glowB:  0 },
+  waiting: { count:  80, speed:  75, turb: 22, maxLife: 1.8,
+             coreR: 255, coreG: 200, coreB:  20,
+             midR:  255, midG:  230, midB:  80,
+             glowR: 110, glowG:  80, glowB:   0 },
+  idle:    { count:  40, speed:  42, turb: 10, maxLife: 2.6,
+             coreR:   0, coreG: 190, coreB: 210,
+             midR:   40, midG:  230, midB: 200,
+             glowR:   0, glowG:  70, glowB:  80 },
+};
+
+let curState = 'idle';
+
+// Lerped params (smooth transition)
+let p = { ...PRESETS.idle };
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function applyLerp(dt) {
+  const tgt = PRESETS[curState];
+  const k = Math.min(dt * 2.5, 1);
+  for (const key of Object.keys(tgt)) {
+    p[key] = lerp(p[key], tgt[key], k);
+  }
+}
+
+// ── Particles ─────────────────────────────────────────
+const MAX = 200;
+const px   = new Float32Array(MAX);   // position x
+const py   = new Float32Array(MAX);   // position y
+const pbx  = new Float32Array(MAX);   // base x (drift center)
+const pvy  = new Float32Array(MAX);   // y velocity
+const plif = new Float32Array(MAX);   // life elapsed
+const pml  = new Float32Array(MAX);   // max life
+const pph  = new Float32Array(MAX);   // sine phase
+const pfr  = new Float32Array(MAX);   // sine freq
+const pz   = new Float32Array(MAX);   // size multiplier
+
+function spawnParticle(i) {
+  const spread = W * 0.22;
+  pbx[i]  = W * 0.5 + (Math.random() - 0.5) * spread * 2;
+  px[i]   = pbx[i];
+  py[i]   = H + Math.random() * 8;
+  pvy[i]  = p.speed * (0.55 + Math.random() * 0.9);
+  plif[i] = 0;
+  pml[i]  = p.maxLife * (0.65 + Math.random() * 0.7);
+  pph[i]  = Math.random() * Math.PI * 2;
+  pfr[i]  = 1.2 + Math.random() * 2.5;
+  pz[i]   = 0.6 + Math.random() * 0.8;
+}
+
+// Init all particles staggered across the height
+for (let i = 0; i < MAX; i++) {
+  spawnParticle(i);
+  py[i] = H - Math.random() * H * 0.9;
+  plif[i] = Math.random() * pml[i];
+}
+
+// ── Draw loop ─────────────────────────────────────────
+let lastTs = 0;
+let raf;
+
+function frame(ts) {
+  raf = requestAnimationFrame(frame);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  applyLerp(dt);
+
+  // Motion-blur clear
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Background glow at bottom-center
+  const bg = ctx.createRadialGradient(W * 0.5, H, 0, W * 0.5, H, H * 0.65);
+  bg.addColorStop(0, `rgba(${~~p.glowR},${~~p.glowG},${~~p.glowB},0.45)`);
+  bg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+
+  const active = Math.round(p.count);
+  const baseSize = Math.min(W, H) / 420;
+
+  for (let i = 0; i < MAX; i++) {
+    if (i >= active) { py[i] = H + 200; continue; }
+
+    plif[i] += dt;
+    if (py[i] < -20 || plif[i] >= pml[i]) {
+      spawnParticle(i);
+      pvy[i] = p.speed  * (0.55 + Math.random() * 0.9);
+      pml[i] = p.maxLife * (0.65 + Math.random() * 0.7);
+      continue;
+    }
+
+    // Horizontal turbulence
+    const drift = Math.sin(pph[i] + plif[i] * pfr[i]) * p.turb;
+    pbx[i] += (Math.random() - 0.5) * 0.4;
+    px[i]   = pbx[i] + drift;
+    py[i]  -= pvy[i] * dt;
+
+    const t     = plif[i] / pml[i];         // 0 → 1
+    const alpha = Math.pow(1 - t, 1.2) * 0.9;
+    if (alpha < 0.01) continue;
+
+    // Color: bright core → state color → transparent tip
+    const hot_t = 1 - t;                    // 1 at base, 0 at tip
+    const r = ~~lerp(p.coreR, p.midR, t * 1.5);
+    const g = ~~lerp(p.coreG, p.midG, t * 1.5);
+    const b = ~~lerp(p.coreB, p.midB, t * 1.5);
+
+    const radius = baseSize * pz[i] * (3.5 - t * 2) * (1 + hot_t * 1.5);
+
+    const grad = ctx.createRadialGradient(px[i], py[i], 0, px[i], py[i], radius);
+    grad.addColorStop(0,   `rgba(255,255,${~~lerp(180, b, t)},${alpha})`);
+    grad.addColorStop(0.25, `rgba(${r},${g},${b},${alpha * 0.85})`);
+    grad.addColorStop(1,   'rgba(0,0,0,0)');
+
+    ctx.beginPath();
+    ctx.arc(px[i], py[i], radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// ── State handling ────────────────────────────────────
+function handleState(s) {
+  if (!PRESETS[s] || s === curState) return;
+  curState = s;
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+handleState('idle');
+raf = requestAnimationFrame(frame);
+</script>
+</body>
+</html>
