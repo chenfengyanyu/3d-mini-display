@@ -13,7 +13,8 @@
 | 状态 | 颜色 | 含义 |
 |------|------|------|
 | 忙碌 | 🔴 红色 | Claude 正在思考 / 执行工具 |
-| 等待 | 🟡 黄色 | Claude 本轮结束，等待判断是否真正完成 |
+| 等待（倒计时）| 🟡 黄色 | Claude 本轮结束，3 秒后无新事件自动转为空闲 |
+| 等待（持续）| 🟡 黄色 | Claude 主动提问（AskUserQuestion），等待你的回复，不会自动转绿 |
 | 空闲 | 🟢 绿色 | 任务全部完成，可发下一条消息 |
 
 > 两次用户输入之间不会出现绿灯。绿灯表示 Claude 已完全停止工作，等待你的下一条消息。
@@ -38,7 +39,7 @@ bash start.sh
 bash stop.sh
 ```
 
-### 17 个动画主题
+### 19 个动画主题
 
 | 图标 | 主题 | 视觉效果 |
 |------|------|---------|
@@ -59,27 +60,33 @@ bash stop.sh
 | 🫧 | 熔岩灯 | Metaball 融合流动色块 |
 | 🌠 | 星空 | 星云 + 流星 + 红灯时极速跃迁 |
 | 😶 | 表情脸 | 抽象艺术脸：忙碌红眼生气、等待无奈问号、空闲开心笑容 |
+| 🏗️ | 盖房子 | 像素积木逐层建造动画 |
+| 🍉 | 切水果 | 忍者切水果风格粒子飞溅 |
 
 ### 工作原理
 
 ```
 用户发消息
   │
-  ├─ UserPromptSubmit hook → set-state.sh busy   🔴 红灯
+  ├─ UserPromptSubmit hook → set-state.sh busy      🔴 红灯
   │
-  ├─ PreToolUse hook       → set-state.sh busy   🔴 红灯（持续）
+  ├─ PreToolUse hook       → set-state.sh busy      🔴 红灯（持续）
+  │    │
+  │    └─ 若工具为 AskUserQuestion / AskFollowupQuestion
+  │         → set-state.sh waiting (persistent)     🟡 黄灯（持续，不倒计时）
+  │              └─ 等待用户回复后 → UserPromptSubmit 再次触发 → 回到红灯
   │
-  ├─ Stop hook             → set-state.sh waiting  🟡 黄灯
+  ├─ Stop hook             → set-state.sh waiting   🟡 黄灯（3 秒倒计时）
   │    │
   │    └─ 若 Claude 继续工作（多 turn）→ PreToolUse 再次触发 → 回到红灯
   │
   └─ Stop hook 触发后 3 秒内无新事件
                               ↓
-                    monitor.js 判定为 idle   🟢 绿灯
+                    monitor.js 判定为 idle           🟢 绿灯
 ```
 
 - **Hooks** 通过 `curl` POST 推送到 `monitor.js`（不再依赖文件）
-- **monitor.js** 在内存维护状态：收到 `busy` 立即取消倒计时；收到 `waiting` 启动 3 秒倒计时，期间若来了 `busy` 则取消倒计时回红灯，3 秒内无新事件才切为 `idle`
+- **monitor.js** 在内存维护状态：收到 `busy` 立即取消倒计时；收到 `waiting` 根据 `persistent` 字段决定行为——普通 Stop 启动 3 秒倒计时，`AskUserQuestion` 则持续黄灯直到用户回复
 - **前端**每 250ms 轮询 `/api/status`，严格跟随服务端状态，通过 `postMessage` 同步给 iframe 主题
 - **绿灯由服务端倒计时决定**：前端无任何计时逻辑
 
@@ -110,7 +117,7 @@ MyBetterDisplay/
 │   ├── monitor.js        # HTTP 监控服务（port 4242）
 │   ├── set-state.sh      # Hook 脚本（由 Claude Code 调用）
 │   └── install-hooks.sh  # 向 settings.json 注入 hooks
-└── themes/               # 17 个动画主题（每个独立 HTML 文件）
+└── themes/               # 19 个动画主题（每个独立 HTML 文件）
 ```
 
 ## 系统要求
