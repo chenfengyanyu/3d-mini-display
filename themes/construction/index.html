@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Construction — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #0a0a0a; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+}
+window.addEventListener('resize', resize); resize();
+
+// ── Palette ───────────────────────────────────────────
+const PAL = {
+  busy:    { r: 255, g:  52, b:  52 },
+  waiting: { r: 255, g: 195, b:   0 },
+  idle:    { r:  48, g: 212, b:  90 },
+};
+let cR = 48, cG = 212, cB = 90;
+let tR = 48, tG = 212, tB = 90;
+let state = 'idle', lastState = null;
+
+// ── Time ──────────────────────────────────────────────
+let t = 0, lastTs = 0;
+
+// ── Screen shake ──────────────────────────────────────
+let shakeX = 0, shakeY = 0;
+let shakeFade = 0;
+
+// ── House build progress ──────────────────────────────
+// 0 = bare ground  0.55 = walls up  0.80 = roof  1.0 = chimney + flag
+let buildProg = 1.0, buildTarget = 1.0;
+
+// ── Hammers (busy) ────────────────────────────────────
+const GRAVITY   = 1400;   // px/s²  — 降低，弧线更自然
+const HAMMER_N  = 3;       // 3把足够，不遮挡房子
+let hammers = [];
+
+function spawnHammer(forced) {
+  const u = Math.min(W, H) * 0.08;
+  const side = Math.random() < 0.5;
+  return {
+    x:    forced ? rand(u * 2, W - u * 2) : (side ? -u * 2 : W + u * 2),
+    y:    rand(H * 0.08, H * 0.45),
+    vx:   rand(180, 380) * (side ? 1 : -1) * (forced ? (Math.random() < 0.5 ? 1 : -1) : 1),
+    vy:   rand(-250, 50),
+    rot:  rand(0, Math.PI * 2),
+    rotV: rand(-7, 7),      // 旋转慢一点更清晰
+    size: rand(0.80, 1.05), // 大小统一，别太悬殊
+    trail: [],
+    impact: 0,
+  };
+}
+
+function initHammers() {
+  hammers = [];
+  for (let i = 0; i < HAMMER_N; i++) hammers.push(spawnHammer(true));
+}
+
+// ── Particles ─────────────────────────────────────────
+let sparks  = [];   // impact sparks
+let dusts   = [];   // ground dust puffs
+let bricks  = [];   // flying bricks
+let smokes  = [];   // idle chimney smoke
+let glows   = [];   // idle window sparkles
+let rings   = [];   // shockwave rings on impact (busy)
+
+// ── Waiting pendulum ──────────────────────────────────
+let pendAngle = Math.PI * 0.38;
+let pendVel   = 0;
+
+// ── Helpers ───────────────────────────────────────────
+const lerp  = (a, b, k) => a + (b - a) * k;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const rand  = (a, b) => a + Math.random() * (b - a);
+const glow  = (col, sz) => { ctx.shadowColor = col; ctx.shadowBlur = sz; };
+const noGlow = () => { ctx.shadowBlur = 0; };
+const col   = () => `rgb(${~~cR},${~~cG},${~~cB})`;
+const a     = v  => `rgba(${~~cR},${~~cG},${~~cB},${v})`;
+
+// ── setState ──────────────────────────────────────────
+function setState(s) {
+  if (s === state) return;
+  state = s;
+  const p = PAL[s];
+  tR = p.r; tG = p.g; tB = p.b;
+
+  sparks = []; dusts = []; bricks = []; rings = [];
+
+  if (s === 'busy') {
+    buildTarget = 0.55;   // 墙体过半，房子轮廓清晰可辨
+    initHammers();
+  } else if (s === 'waiting') {
+    buildTarget = 0.68;
+    hammers = [];
+    pendAngle = Math.PI * 0.38;
+    pendVel   = 0;
+  } else {
+    buildTarget = 1.0;
+    hammers = [];
+    smokes  = [];
+    glows   = [];
+  }
+}
+
+// ── Main loop ─────────────────────────────────────────
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts; t += dt;
+
+  // Color lerp
+  const ck = 1 - Math.pow(0.01, dt);
+  cR = lerp(cR, tR, ck);
+  cG = lerp(cG, tG, ck);
+  cB = lerp(cB, tB, ck);
+
+  const u  = Math.min(W, H) * 0.08;
+  const gy = H * 0.72;           // ground line y — 下移留出顶部空间
+
+  // Build progress
+  buildProg = lerp(buildProg, buildTarget, dt * (state === 'busy' ? 2.8 : 1.8));
+
+  // Screen shake — 仅在锤子撞击瞬间触发，幅度极小
+  shakeFade = lerp(shakeFade, 0, dt * 14);
+  if (shakeFade > 0.02) {
+    shakeX = (Math.random() * 2 - 1) * u * 0.12 * shakeFade;
+    shakeY = (Math.random() * 2 - 1) * u * 0.07 * shakeFade;
+  } else { shakeX = 0; shakeY = 0; }
+
+  // ── Per-state update ──────────────────────────────
+  if (state === 'busy') updateBusy(dt, u, gy, W / 2);
+  if (state === 'waiting') updateWaiting(dt, u, gy);
+  if (state === 'idle')    updateIdle(dt, u, gy);
+
+  // ── Shared particles ──────────────────────────────
+  sparks = sparks.filter(s => {
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    s.vy += GRAVITY * 0.55 * dt;
+    s.life -= dt * 2.8; return s.life > 0;
+  });
+  dusts = dusts.filter(d => {
+    const u2 = Math.min(W, H) * 0.08;
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    d.r += dt * u2 * 0.9;   // 明显扩散
+    d.a -= dt * 1.8;
+    return d.a > 0;
+  });
+  rings = rings.filter(r => {
+    r.rad += r.spd * dt; r.a -= dt * 2.2;
+    return r.a > 0;
+  });
+
+  draw(u, gy);
+}
+
+function updateBusy(dt, u, gy, cx) {
+  // Hammers physics
+  hammers.forEach(h => {
+    h.trail.push({ x: h.x, y: h.y });
+    if (h.trail.length > 7) h.trail.shift();  // 短尾迹更清爽
+
+    h.x  += h.vx  * dt;
+    h.y  += h.vy  * dt;
+    h.vy += GRAVITY * dt;
+    h.rot += h.rotV * dt;
+    h.impact = lerp(h.impact, 0, dt * 9);
+
+    // Bounce walls
+    const margin = u * 0.6;
+    if (h.x < margin) {
+      h.x = margin; h.vx = Math.abs(h.vx) * 0.78;
+      impact(h, u);
+    }
+    if (h.x > W - margin) {
+      h.x = W - margin; h.vx = -Math.abs(h.vx) * 0.78;
+      impact(h, u);
+    }
+    if (h.y < u * 0.3) {
+      h.y = u * 0.3; h.vy = Math.abs(h.vy) * 0.72;
+      impact(h, u);
+    }
+    if (h.y > gy - u * 0.4) {
+      h.y = gy - u * 0.4; h.vy = -Math.abs(h.vy) * 0.80;
+      impact(h, u);
+    }
+  });
+
+  // Keep hammer count
+  while (hammers.length < HAMMER_N) hammers.push(spawnHammer(true));
+
+  // 偶尔飞起一块砖 — 稀疏，弧线自然
+  if (Math.random() < dt * 1.2 && bricks.length < 3) {
+    const sx = cx + rand(-u * 3, u * 3);
+    bricks.push({
+      x: sx, y: gy - u * 0.4,
+      vx: rand(-u * 2.5, u * 2.5),
+      vy: rand(-u * 6, -u * 3.5),
+      rot: rand(0, Math.PI * 2),
+      rotV: rand(-8, 8),
+      w: u * 0.58, h: u * 0.30,
+      life: 1.0,
+    });
+  }
+  bricks = bricks.filter(b => {
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    b.vy += GRAVITY * 0.75 * dt;
+    b.rot += b.rotV * dt;
+    b.life -= dt * 0.7;
+    return b.life > 0 && b.y < H + u * 2;
+  });
+}
+
+function impact(h, u) {
+  h.impact = 1.0;
+  shakeFade = 0.8;  // 撞击瞬间触发微抖
+  // 少量火花 — 4颗即可
+  for (let i = 0; i < 4; i++) {
+    const ang = rand(0, Math.PI * 2);
+    const spd = rand(u * 2, u * 6);
+    sparks.push({ x: h.x, y: h.y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd - u * 1.5,
+      life: 1.0 });
+  }
+  // 1圈扩散环（轻）
+  rings.push({ x: h.x, y: h.y, rad: u * 0.3, spd: u * 5.5, a: 0.55 });
+  // 2块尘雾
+  for (let i = 0; i < 2; i++) {
+    dusts.push({ x: h.x, y: h.y,
+      vx: rand(-u, u) * 0.8,
+      vy: rand(-u * 1.2, -u * 0.3),
+      r: u * 0.25, a: 0.40 });
+  }
+}
+
+function updateWaiting(dt, u, gy) {
+  // Pendulum physics (simple gravity pendulum)
+  const L    = u * 3.8;
+  const grav = GRAVITY * 0.6;
+  pendVel += (-grav / L) * Math.sin(pendAngle) * dt;
+  pendVel  *= 0.9985;  // slight damping but mostly free-swinging
+  pendAngle += pendVel * dt;
+  // Keep swing in check
+  if (Math.abs(pendAngle) > Math.PI * 0.5) {
+    pendAngle = Math.sign(pendAngle) * Math.PI * 0.5;
+    pendVel  *= -0.6;
+  }
+}
+
+function updateIdle(dt, u, gy) {
+  // Chimney smoke
+  if (buildProg > 0.88 && Math.random() < dt * 3.5) {
+    smokes.push({
+      x: 0, y: 0,
+      vx: rand(-u * 0.35, u * 0.35),
+      vy: -(rand(u * 1.2, u * 2.0)),
+      r: u * 0.22,
+      a: 0.55,
+    });
+  }
+  smokes = smokes.filter(s => {
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    s.r += dt * u * 0.40; s.a -= dt * 0.40;
+    return s.a > 0;
+  });
+
+  // 萤火虫 — 少而精，不抢房子风头
+  if (Math.random() < dt * 1.4 && glows.length < 5) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    glows.push({
+      x: side * rand(0.18, 0.45),
+      y: rand(0.10, 0.50),
+      vx: side * rand(u * 0.4, u * 0.9),
+      vy: -rand(u * 1.0, u * 2.2),
+      life: 1.0,
+      sz: rand(u * 0.14, u * 0.22),
+    });
+  }
+  glows = glows.filter(g => {
+    g.x += g.vx * dt; g.y += g.vy * dt; g.life -= dt * 0.65;
+    return g.life > 0;
+  });
+}
+
+// ── Draw ──────────────────────────────────────────────
+function draw(u, gy) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2;
+
+  // Background radial bloom
+  const bg = ctx.createRadialGradient(cx, gy * 0.75, 0, cx, gy * 0.75, u * 10);
+  bg.addColorStop(0, a(0.07));
+  bg.addColorStop(1, a(0));
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(cx, gy * 0.75, u * 10, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  drawGround(cx, gy, u);
+  drawHouse(cx, gy, u);
+  drawParticles(cx, gy, u);
+  if (state === 'busy')    drawHammers(cx, gy, u);
+  if (state === 'waiting') drawWaiting(cx, gy, u);
+  if (state === 'idle')    drawIdle(cx, gy, u);
+
+  ctx.restore();
+}
+
+// ── Ground ────────────────────────────────────────────
+function drawGround(cx, gy, u) {
+  glow(col(), u);
+  ctx.strokeStyle = a(0.32);
+  ctx.lineWidth   = u * 0.15;
+  ctx.lineCap     = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 7.5, gy);
+  ctx.lineTo(cx + u * 7.5, gy);
+  ctx.stroke(); noGlow();
+
+  const gfill = ctx.createLinearGradient(0, gy, 0, gy + u * 1.5);
+  gfill.addColorStop(0, a(0.09));
+  gfill.addColorStop(1, a(0));
+  ctx.fillStyle = gfill;
+  ctx.fillRect(cx - u * 7.5, gy, u * 15, u * 1.5);
+}
+
+// ── House ─────────────────────────────────────────────
+function drawHouse(cx, gy, u) {
+  const bp   = buildProg;
+  const HW   = u * 5.2;   // half-width of walls
+  const WH   = u * 4.2;   // wall height  — 降低，配合地面下移
+  const RH   = u * 2.0;   // roof height  — 压扁屋顶，总高 u×6.2 留顶部空白
+  const wallTop  = gy - WH;
+  const roofPeak = wallTop - RH;
+
+  // Scaffolding behind house (visible during construction)
+  if (bp < 0.95 && state !== 'idle') {
+    drawScaffolding(cx, gy, u, HW, WH);
+  }
+
+  // ── Wall (builds from ground up) ──────────────────
+  const wallH = bp * WH;
+  const wTop  = gy - wallH;
+  if (wallH > 1) {
+    // Wall fill — 亮一点才看得清
+    const wg = ctx.createLinearGradient(cx, wTop, cx, gy);
+    wg.addColorStop(0, a(0.22));
+    wg.addColorStop(1, a(0.12));
+    ctx.fillStyle = wg;
+    ctx.fillRect(cx - HW, wTop, HW * 2, wallH);
+
+    // Brick grid
+    drawBricks(cx, gy, u, HW, WH, bp);
+
+    // Wall outline
+    glow(col(), u * 0.7);
+    ctx.strokeStyle = a(0.82);
+    ctx.lineWidth   = u * 0.20;
+    ctx.lineJoin    = 'round';
+    ctx.strokeRect(cx - HW, wTop, HW * 2, wallH);
+    noGlow();
+  }
+
+  // ── Roof (appears at bp > 0.70) ───────────────────
+  if (bp > 0.70) {
+    const ra = clamp((bp - 0.70) / 0.28, 0, 1);
+    const roofTop = lerp(wallTop, roofPeak, ra);
+    glow(col(), u * 1.0);
+    ctx.fillStyle   = a(0.16 * ra);
+    ctx.strokeStyle = a(0.90 * ra);
+    ctx.lineWidth   = u * 0.24;
+    ctx.lineJoin    = 'round';
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - HW - u * 0.55, wallTop);
+    ctx.lineTo(cx, roofTop);
+    ctx.lineTo(cx + HW + u * 0.55, wallTop);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // Roof sheen
+    const sheen = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.9));
+    glow(col(), u * 1.8);
+    ctx.strokeStyle = a(0.28 * ra * sheen);
+    ctx.lineWidth   = u * 0.10;
+    ctx.beginPath();
+    ctx.moveTo(cx - u * 0.7, roofTop + (wallTop - roofTop) * 0.88);
+    ctx.lineTo(cx + u * 0.5, roofTop + (wallTop - roofTop) * 0.88);
+    ctx.stroke(); noGlow();
+  }
+
+  // ── Door (bp > 0.28) ──────────────────────────────
+  if (bp > 0.28) {
+    const da = clamp((bp - 0.28) / 0.26, 0, 1);
+    const dW = u * 0.92, dH = u * 1.65;
+    const dx = cx - dW * 0.5, dy = gy - dH;
+    glow(col(), u * 0.9);
+    ctx.fillStyle   = a(0.08 * da);
+    ctx.strokeStyle = a(0.78 * da);
+    ctx.lineWidth   = u * 0.16;
+    ctx.beginPath();
+    ctx.moveTo(dx, gy);
+    ctx.lineTo(dx, dy + u * 0.42);
+    ctx.quadraticCurveTo(dx, dy, dx + u * 0.46, dy);
+    ctx.quadraticCurveTo(dx + dW, dy, dx + dW, dy + u * 0.42);
+    ctx.lineTo(dx + dW, gy);
+    ctx.fill(); ctx.stroke();
+    // Knob
+    ctx.fillStyle = a(0.62 * da);
+    glow(col(), u * 0.6);
+    ctx.beginPath(); ctx.arc(dx + dW * 0.72, dy + dH * 0.55, u * 0.10, 0, Math.PI * 2); ctx.fill();
+    noGlow();
+  }
+
+  // ── Windows (bp > 0.52) ───────────────────────────
+  if (bp > 0.52) {
+    const wa = clamp((bp - 0.52) / 0.28, 0, 1);
+    const wW = u * 1.05, wH = u * 0.95;
+    const wY = wallTop + WH * 0.28;
+    const offsets = [cx - HW * 0.52, cx + HW * 0.52];
+    offsets.forEach(wx => drawWindow(wx, wY, wW, wH, u, wa));
+  }
+
+  // ── Chimney (bp > 0.86) ───────────────────────────
+  if (bp > 0.86) {
+    const ca = clamp((bp - 0.86) / 0.14, 0, 1);
+    const CW = u * 0.78, CH = u * 1.30;
+    const cx2 = cx + HW * 0.38;
+    const roofY = wallTop - RH * ((bp - 0.70) / 0.30 < 1 ? (bp - 0.70) / 0.30 : 1);
+    // chimney base just above roof slope
+    const chimneyBase = roofY + RH * 0.35;
+    glow(col(), u * 1.0);
+    ctx.fillStyle   = a(0.12 * ca);
+    ctx.strokeStyle = a(0.78 * ca);
+    ctx.lineWidth   = u * 0.16;
+    ctx.strokeRect(cx2 - CW * 0.5, chimneyBase - CH, CW, CH);
+    ctx.fillRect(cx2 - CW * 0.5, chimneyBase - CH, CW, CH);
+    noGlow();
+  }
+}
+
+// ── Brick pattern ─────────────────────────────────────
+function drawBricks(cx, gy, u, HW, WH, bp) {
+  const ROWS = 8, COLS = 6;
+  const bW = (HW * 2) / COLS;
+  const bH = WH / ROWS;
+  const builtRows = Math.ceil(bp * ROWS);
+  ctx.lineWidth = u * 0.055;
+
+  for (let r = 0; r < builtRows; r++) {
+    const by = gy - (r + 1) * bH;
+    const off = (r % 2) * bW * 0.5;
+    for (let c = -1; c <= COLS; c++) {
+      const bx = cx - HW + c * bW + off;
+      // 错缝砖块，交替亮度
+      const alpha = 0.22 + 0.08 * ((r + c) & 1);
+      ctx.strokeStyle = a(alpha);
+      ctx.strokeRect(bx + 1.5, by + 1.5, bW - 3, bH - 3);
+    }
+  }
+}
+
+// ── Window ────────────────────────────────────────────
+function drawWindow(cx, cy, wW, wH, u, alpha) {
+  // Warm glow in idle
+  const winGlow = state === 'idle'
+    ? (0.50 + 0.50 * Math.abs(Math.sin(t * 1.6 + cx * 0.005)))
+    : 0.18;
+  glow(col(), u * winGlow * 4.5);
+  ctx.fillStyle   = a((0.06 + winGlow * 0.10) * alpha);
+  ctx.strokeStyle = a(0.80 * alpha);
+  ctx.lineWidth   = u * 0.16;
+  ctx.beginPath();
+  ctx.rect(cx - wW * 0.5, cy, wW, wH);
+  ctx.fill(); ctx.stroke();
+  // Cross pane
+  ctx.strokeStyle = a(0.38 * alpha);
+  ctx.lineWidth   = u * 0.08;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + wH);
+  ctx.moveTo(cx - wW * 0.5, cy + wH * 0.5); ctx.lineTo(cx + wW * 0.5, cy + wH * 0.5);
+  ctx.stroke(); noGlow();
+}
+
+// ── Scaffolding ───────────────────────────────────────
+function drawScaffolding(cx, gy, u, HW, WH) {
+  const scW = HW + u * 1.1;
+  const scTop = gy - WH * 1.08;
+  ctx.strokeStyle = a(0.22);
+  ctx.lineWidth   = u * 0.10;
+  glow(col(), u * 0.35);
+
+  // Vertical poles
+  const POLES = 6;
+  for (let i = 0; i <= POLES; i++) {
+    const px = cx - scW + (i / POLES) * scW * 2;
+    ctx.beginPath();
+    ctx.moveTo(px, gy); ctx.lineTo(px, scTop);
+    ctx.stroke();
+  }
+  // Horizontal bars (4 levels)
+  ctx.strokeStyle = a(0.18);
+  ctx.lineWidth   = u * 0.12;
+  for (let i = 0; i <= 4; i++) {
+    const py = gy - (i / 4) * (WH * 1.05);
+    ctx.beginPath();
+    ctx.moveTo(cx - scW, py); ctx.lineTo(cx + scW, py);
+    ctx.stroke();
+  }
+  // Diagonal braces
+  ctx.strokeStyle = a(0.11);
+  ctx.lineWidth   = u * 0.07;
+  for (let i = 0; i < POLES; i++) {
+    const x1 = cx - scW + (i / POLES) * scW * 2;
+    const x2 = cx - scW + ((i + 1) / POLES) * scW * 2;
+    const y1 = gy; const y2 = gy - WH * 0.26;
+    i % 2 === 0
+      ? (ctx.beginPath(), ctx.moveTo(x1, y1), ctx.lineTo(x2, y2), ctx.stroke())
+      : (ctx.beginPath(), ctx.moveTo(x2, y1), ctx.lineTo(x1, y2), ctx.stroke());
+  }
+  noGlow();
+}
+
+// ── Particles ─────────────────────────────────────────
+function drawParticles(cx, gy, u) {
+  // Shockwave rings
+  rings.forEach(r => {
+    glow(col(), u * 1.5);
+    ctx.strokeStyle = a(r.a * 0.70);
+    ctx.lineWidth   = u * 0.12;
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.rad, 0, Math.PI * 2); ctx.stroke();
+    noGlow();
+  });
+
+  // Sparks
+  sparks.forEach(s => {
+    const op = s.life * 0.85;
+    glow(col(), u * 0.40);
+    ctx.fillStyle = a(op);
+    ctx.beginPath(); ctx.arc(s.x, s.y, u * 0.09 * s.life + 0.5, 0, Math.PI * 2); ctx.fill();
+    // Mini trail
+    ctx.strokeStyle = a(op * 0.35);
+    ctx.lineWidth   = u * 0.05;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(s.x - s.vx * 0.032, s.y - s.vy * 0.032);
+    ctx.stroke();
+    noGlow();
+  });
+
+  // Dust puffs
+  dusts.forEach(d => {
+    ctx.strokeStyle = a(d.a * 0.45);
+    ctx.lineWidth   = u * 0.07;
+    glow(col(), u * 0.3);
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.stroke();
+    noGlow();
+  });
+
+  // Flying bricks
+  bricks.forEach(b => {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+    const op = b.life * 0.88;
+    glow(col(), u * 0.9);
+    ctx.fillStyle   = a(op * 0.14);
+    ctx.strokeStyle = a(op * 0.72);
+    ctx.lineWidth   = u * 0.13;
+    ctx.strokeRect(-b.w * 0.5, -b.h * 0.5, b.w, b.h);
+    ctx.fillRect(-b.w * 0.5, -b.h * 0.5, b.w, b.h);
+    ctx.strokeStyle = a(op * 0.28);
+    ctx.lineWidth   = u * 0.06;
+    ctx.beginPath(); ctx.moveTo(0, -b.h * 0.5); ctx.lineTo(0, b.h * 0.5); ctx.stroke();
+    noGlow();
+    ctx.restore();
+  });
+
+  // Chimney smoke (idle)
+  if (state === 'idle' && buildProg > 0.88) {
+    const HW = u * 5.2, WH = u * 4.2, RH = u * 2.0;
+    const wallTop  = gy - WH;
+    const chiX = cx + HW * 0.38;
+    const chiBase = wallTop - RH * 0.65 - u * 1.30;  // 与烟囱顶端精确对齐
+    smokes.forEach(s => {
+      glow(col(), u * 1.0);
+      ctx.strokeStyle = a(s.a * 0.42);
+      ctx.lineWidth   = u * 0.09;
+      ctx.beginPath();
+      ctx.arc(chiX + s.x, chiBase + s.y, s.r, 0, Math.PI * 2);
+      ctx.stroke(); noGlow();
+    });
+  }
+
+  // Fireflies / sparkles (idle)
+  if (state === 'idle') {
+    glows.forEach(g2 => {
+      const px = cx + g2.x * W * 0.55;
+      const py = gy * 0.5 + g2.y * gy * 0.9 - (1 - g2.life) * u * 2.5;
+      const sz = g2.sz;
+      const op = g2.life * 0.85;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(t * 1.8 + g2.x * 6);
+      ctx.strokeStyle = a(op);
+      ctx.lineWidth   = sz * 0.30;
+      ctx.lineCap     = 'round';
+      glow(col(), sz * 2.8);
+      for (let i = 0; i < 4; i++) {
+        const ang = (i / 4) * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang) * sz * 0.28, Math.sin(ang) * sz * 0.28);
+        ctx.lineTo(Math.cos(ang) * sz, Math.sin(ang) * sz);
+        ctx.moveTo(-Math.cos(ang) * sz * 0.28, -Math.sin(ang) * sz * 0.28);
+        ctx.lineTo(-Math.cos(ang) * sz, -Math.sin(ang) * sz);
+        ctx.stroke();
+      }
+      ctx.restore();
+      noGlow();
+    });
+  }
+}
+
+// ── Draw hammers (busy) ───────────────────────────────
+function drawHammers(cx, gy, u) {
+  hammers.forEach(h => {
+    // Motion trail — 淡，细，不喧宾夺主
+    for (let i = 1; i < h.trail.length; i++) {
+      const p0 = h.trail[i - 1], p1 = h.trail[i];
+      const frac = i / h.trail.length;
+      ctx.strokeStyle = a(frac * 0.16);
+      ctx.lineWidth   = u * 0.18 * h.size * frac;
+      ctx.lineCap     = 'round';
+      ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+    }
+
+    // Impact flash halo
+    if (h.impact > 0.02) {
+      glow(col(), u * h.impact * 2.5);
+      ctx.strokeStyle = a(h.impact * 0.45);
+      ctx.lineWidth   = u * 0.18;
+      ctx.beginPath(); ctx.arc(h.x, h.y, u * h.size * 1.2, 0, Math.PI * 2); ctx.stroke();
+      noGlow();
+    }
+
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    ctx.rotate(h.rot);
+
+    const sz = u * h.size;
+
+    glow(col(), sz * 1.6);   // 光晕收敛，锤子轮廓清晰
+    ctx.lineCap  = 'round';
+    ctx.lineJoin = 'round';
+
+    // Handle
+    ctx.strokeStyle = a(0.88);
+    ctx.lineWidth   = sz * 0.20;
+    ctx.beginPath();
+    ctx.moveTo(0, -sz * 0.55);
+    ctx.lineTo(0,  sz * 1.25);
+    ctx.stroke();
+
+    // Head body
+    ctx.fillStyle   = a(0.18);
+    ctx.strokeStyle = a(1.00);
+    ctx.lineWidth   = sz * 0.19;
+    ctx.beginPath();
+    ctx.rect(-sz * 0.62, -sz * 1.08, sz * 1.24, sz * 0.60);
+    ctx.fill(); ctx.stroke();
+
+    // Head face detail (crosshatch)
+    ctx.strokeStyle = a(0.38);
+    ctx.lineWidth   = sz * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(-sz * 0.20, -sz * 1.08);
+    ctx.lineTo(-sz * 0.20, -sz * 0.48);
+    ctx.moveTo( sz * 0.20, -sz * 1.08);
+    ctx.lineTo( sz * 0.20, -sz * 0.48);
+    ctx.stroke();
+
+    // Head end caps
+    ctx.strokeStyle = a(0.72);
+    ctx.lineWidth   = sz * 0.14;
+    ctx.beginPath();
+    ctx.moveTo(-sz * 0.62, -sz * 1.08);
+    ctx.lineTo(-sz * 0.62, -sz * 0.48);
+    ctx.moveTo( sz * 0.62, -sz * 1.08);
+    ctx.lineTo( sz * 0.62, -sz * 0.48);
+    ctx.stroke();
+
+    ctx.restore(); noGlow();
+  });
+}
+
+// ── Waiting scene ─────────────────────────────────────
+function drawWaiting(cx, gy, u) {
+  // ── Pendulum ──────────────────────────────────────
+  // Pivot point: above roof
+  const HW   = u * 5.2, WH = u * 4.2, RH = u * 2.0;
+  const pivX = cx;
+  const pivY = gy - WH - RH - u * 1.2;
+  const armL = u * 3.8;
+  const headX = pivX + Math.sin(pendAngle) * armL;
+  const headY = pivY + Math.cos(pendAngle) * armL;
+
+  // Pivot dot
+  glow(col(), u * 0.8);
+  ctx.fillStyle = a(0.60);
+  ctx.beginPath(); ctx.arc(pivX, pivY, u * 0.22, 0, Math.PI * 2); ctx.fill();
+
+  // Arm rope
+  ctx.strokeStyle = a(0.45);
+  ctx.lineWidth   = u * 0.11;
+  ctx.beginPath(); ctx.moveTo(pivX, pivY); ctx.lineTo(headX, headY); ctx.stroke();
+
+  // Hanging hammer
+  ctx.save();
+  ctx.translate(headX, headY);
+  ctx.rotate(pendAngle + Math.PI * 0.5);
+  const sz = u * 1.05;
+  glow(col(), sz * 1.5);
+  ctx.strokeStyle = a(0.92);
+  ctx.lineWidth   = sz * 0.20;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(0, -sz * 0.55); ctx.lineTo(0, sz * 1.25); ctx.stroke();
+  ctx.fillStyle   = a(0.18);
+  ctx.strokeStyle = a(1.00);
+  ctx.lineWidth   = sz * 0.19;
+  ctx.beginPath();
+  ctx.rect(-sz * 0.62, -sz * 1.08, sz * 1.24, sz * 0.60);
+  ctx.fill(); ctx.stroke();
+  ctx.restore(); noGlow();
+
+  // ── Warning lights (blinking) ─────────────────────
+  const lights = [cx - u * 6.5, cx + u * 6.5];
+  lights.forEach((lx, i) => {
+    const blink = (Math.sin(t * 4.5 + i * Math.PI) + 1) * 0.5;
+    const op    = 0.25 + 0.75 * blink;
+    glow(col(), u * blink * 2.2);
+    ctx.fillStyle   = a(op * 0.30);
+    ctx.strokeStyle = a(op * 0.90);
+    ctx.lineWidth   = u * 0.15;
+    ctx.beginPath(); ctx.arc(lx, gy - u * 1.2, u * 0.55, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Inner bright dot
+    ctx.fillStyle = a(op * 0.80);
+    ctx.beginPath(); ctx.arc(lx, gy - u * 1.2, u * 0.22, 0, Math.PI * 2); ctx.fill();
+    noGlow();
+  });
+
+  // ── Worker stick figure ───────────────────────────
+  const wX   = cx - u * 5.2;
+  const sway = Math.sin(t * 0.85) * 0.04;
+  ctx.save();
+  ctx.translate(wX, gy);
+  ctx.rotate(sway);
+  ctx.strokeStyle = a(0.58);
+  ctx.lineWidth   = u * 0.20;
+  ctx.lineCap     = 'round';
+  glow(col(), u * 0.7);
+  // Head
+  ctx.beginPath(); ctx.arc(0, -u * 2.55, u * 0.40, 0, Math.PI * 2); ctx.stroke();
+  // Hard hat
+  ctx.fillStyle   = a(0.22);
+  ctx.strokeStyle = a(0.68);
+  ctx.lineWidth   = u * 0.16;
+  ctx.beginPath();
+  ctx.arc(0, -u * 2.78, u * 0.52, Math.PI, 0);
+  ctx.lineTo(u * 0.68, -u * 2.78);
+  ctx.lineTo(-u * 0.68, -u * 2.78);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Body
+  ctx.strokeStyle = a(0.58);
+  ctx.lineWidth   = u * 0.20;
+  ctx.beginPath(); ctx.moveTo(0, -u * 2.15); ctx.lineTo(0, -u * 0.50); ctx.stroke();
+  // Arms
+  ctx.beginPath();
+  ctx.moveTo(0, -u * 1.80); ctx.lineTo(-u * 0.92, -u * 1.05);
+  ctx.moveTo(0, -u * 1.80); ctx.lineTo( u * 0.92, -u * 1.05);
+  ctx.stroke();
+  // Legs
+  ctx.beginPath();
+  ctx.moveTo(0, -u * 0.50); ctx.lineTo(-u * 0.52, 0);
+  ctx.moveTo(0, -u * 0.50); ctx.lineTo( u * 0.52, 0);
+  ctx.stroke();
+  noGlow();
+  ctx.restore();
+
+  // ── Floating "..." wait dots ───────────────────────
+  const dotY = gy - WH - u * 0.6;  // 悬在墙顶上方
+  const dotR = u * 0.18;
+  const dotPhase = t * 1.35;
+  for (let i = 0; i < 3; i++) {
+    const ph     = (dotPhase - i * 0.44) % 1.5;
+    const bright = (ph > 0 && ph < 0.6) ? Math.sin((ph / 0.6) * Math.PI) : 0;
+    glow(col(), dotR * bright * 4.5);
+    ctx.fillStyle = a(0.22 + bright * 0.68);
+    ctx.beginPath();
+    ctx.arc(cx + (i - 1) * u * 0.62, dotY, dotR * (0.7 + bright * 0.3), 0, Math.PI * 2);
+    ctx.fill(); noGlow();
+  }
+}
+
+// ── Idle extras ───────────────────────────────────────
+function drawIdle(cx, gy, u) {
+  const HW = u * 5.2, WH = u * 4.2, RH = u * 2.0;
+  const wallTop  = gy - WH;
+  const roofPeak = wallTop - RH;
+
+  // ── Waving flag ───────────────────────────────────
+  const poleH = u * 1.4;  // 旗杆短一点，不顶出屏幕
+  const flagH = u * 0.72;
+  const flagW = u * 1.35;
+  // Pole
+  glow(col(), u * 0.5);
+  ctx.strokeStyle = a(0.55);
+  ctx.lineWidth   = u * 0.10;
+  ctx.beginPath();
+  ctx.moveTo(cx, roofPeak);
+  ctx.lineTo(cx, roofPeak - poleH);
+  ctx.stroke();
+
+  // Flag cloth — wave with bezier
+  const w1 = Math.sin(t * 5.5) * flagH * 0.40;
+  const w2 = Math.sin(t * 5.5 + 1.4) * flagH * 0.28;
+  glow(col(), u * 1.1);
+  ctx.fillStyle   = a(0.22);
+  ctx.strokeStyle = a(0.82);
+  ctx.lineWidth   = u * 0.13;
+  ctx.beginPath();
+  ctx.moveTo(cx, roofPeak - poleH);
+  ctx.quadraticCurveTo(cx + flagW * 0.5, roofPeak - poleH + flagH * 0.5 + w1,
+                       cx + flagW,       roofPeak - poleH + flagH * 0.18 + w2);
+  ctx.lineTo(cx + flagW, roofPeak - poleH + flagH * 0.92 + w2);
+  ctx.quadraticCurveTo(cx + flagW * 0.5, roofPeak - poleH + flagH * 1.25 + w1,
+                       cx, roofPeak - poleH + flagH);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke(); noGlow();
+
+  // ── Star burst at roof peak ────────────────────────
+  const pulse = 0.55 + 0.45 * Math.abs(Math.sin(t * 2.1));
+  ctx.save();
+  ctx.translate(cx, roofPeak - u * 0.18);
+  ctx.rotate(t * 0.65);
+  glow(col(), u * pulse * 2.5);
+  ctx.strokeStyle = a(0.72 * pulse);
+  ctx.lineWidth   = u * 0.14;
+  ctx.lineCap     = 'round';
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(ang) * u * 0.22, Math.sin(ang) * u * 0.22);
+    ctx.lineTo(Math.cos(ang) * u * 0.55, Math.sin(ang) * u * 0.55);
+    ctx.stroke();
+  }
+  ctx.restore(); noGlow();
+}
+
+// ── State wiring ──────────────────────────────────────
+function handleState(s) {
+  if (s === lastState) return;
+  lastState = s;
+  setState(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+async function poll() {
+  try {
+    const d = await (await fetch('/api/status')).json();
+    if (d?.state) handleState(d.state);
+  } catch {}
+}
+if (window.self === window.top) { setInterval(poll, 250); poll(); }
+requestAnimationFrame(animate);
+handleState('idle');
+</script>
+</body>
+</html>

@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fruit Slash — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #06060f; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = canvas.offsetWidth; H = canvas.height = canvas.offsetHeight; }
+window.addEventListener('resize', resize); resize();
+
+// ── Fruit types ───────────────────────────────────────
+const FRUITS = [
+  { name:'watermelon', outer:'#1d8a1d', inner:'#ff2244', seed:'#111',    r:1.05 },
+  { name:'orange',     outer:'#e87200', inner:'#ffcc44', seed:'#bb4400', r:0.88 },
+  { name:'lemon',      outer:'#ddc800', inner:'#fffbaa', seed:'#998800', r:0.78 },
+  { name:'kiwi',       outer:'#4a3008', inner:'#3ec820', seed:'#eeeebb', r:0.75 },
+  { name:'grape',      outer:'#6611cc', inner:'#dd99ff', seed: null,     r:0.65 },
+  { name:'strawberry', outer:'#cc1133', inner:'#ffaabb', seed:'#ffee33', r:0.82 },
+  { name:'mango',      outer:'#ff9000', inner:'#ffec22', seed:'#bb5500', r:0.92 },
+  { name:'dragonfruit',outer:'#cc1188', inner:'#ffeef6', seed:'#333',    r:0.88 },
+  { name:'blueberry',  outer:'#2233bb', inner:'#aabbff', seed: null,     r:0.58 },
+  { name:'peach',      outer:'#ff9988', inner:'#ffd4a0', seed:'#884422', r:0.84 },
+];
+
+// ── Globals ───────────────────────────────────────────
+let state = 'idle', lastState = null;
+let t = 0, lastTs = 0;
+const G = 580;  // gentle gravity → high arcs visible for longer
+
+let fruits    = [];
+let juices    = [];
+let slashes   = [];   // post-cut glow lines
+let glints    = [];   // idle sparkles
+let nextCutIn = 0;
+let reticleA  = 0;
+
+// ── Knife (animated swipe) ────────────────────────────
+// The knife sweeps from (sx,sy) → (ex,ey) over SWIPE_DUR seconds
+const SWIPE_DUR = 0.18;
+let knife = {
+  active: false,
+  p: 0,                     // progress 0→1
+  sx:0, sy:0, ex:0, ey:0,   // start / end world coords
+  angle: 0,                 // direction of sweep
+  trail: [],                // [ {x,y,life} ] — blade motion trail
+  hitDone: false,           // already triggered cut this swipe?
+  // Waiting-mode: hovering knife (no sweep, just float)
+  hoverX: -200, hoverY: -200, hoverAngle: 0,
+};
+
+// ── Helpers ───────────────────────────────────────────
+const lerp   = (a, b, k) => a + (b - a) * k;
+const clamp  = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const rand   = (a, b) => a + Math.random() * (b - a);
+const glow   = (c, r) => { ctx.shadowColor = c; ctx.shadowBlur = r; };
+const noGlow = () => { ctx.shadowBlur = 0; };
+function rgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+function easeOut(p) { return 1 - (1 - p) * (1 - p); }
+function easeInOut(p) { return p < 0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2; }
+
+// Precompute seed positions (called once at spawn, not every frame)
+function makeSeeds(type) {
+  if (!type.seed) return [];
+  const n = type.name==='watermelon' ? 7 : type.name==='kiwi' ? 10 : type.name==='strawberry' ? 6 : 4;
+  return Array.from({length:n}, (_, i) => ({
+    ang:  (i/n)*Math.PI*2 + rand(-0.18, 0.18),
+    dist: rand(0.22, 0.60),
+    rx:   type.name==='kiwi' ? rand(0.038,0.052) : rand(0.034,0.048),
+    ry:   type.name==='kiwi' ? rand(0.038,0.052) : rand(0.065,0.092),
+  }));
+}
+
+// ── Fruit factories ───────────────────────────────────
+function makeFlyingFruit(overrides={}) {
+  const u = Math.min(W,H)*0.08;
+  const type = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+  // Launch from just below the bottom edge.
+  // vy is strong enough to guarantee the peak reaches the top half of screen:
+  //   rise = vy²/(2G) ≥ H*0.75, so vy_min = sqrt(2*G*H*0.75)
+  const vyMin = Math.sqrt(2 * G * H * 0.75);
+  return {
+    type, seeds: makeSeeds(type),
+    cut: false, halves: null,
+    x:   rand(W*0.15, W*0.85),
+    y:   H + u * 1.5,              // off-screen bottom
+    vx:  rand(-u*1.6, u*1.6),
+    vy:  -(vyMin + rand(0, u*4)),   // strong upward — arcs high into view
+    rot: rand(0, Math.PI*2),
+    rotV: rand(-3, 3),
+    ...overrides,
+  };
+}
+
+function makeWaitingFruit(index, total) {
+  // Fruits positioned across the screen at mid-height, they bob in place
+  const u  = Math.min(W,H)*0.08;
+  const type = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+  const fx = W * (0.25 + (index/(total-1||1)) * 0.50);
+  const fy = H * rand(0.30, 0.52);
+  return {
+    type, seeds: makeSeeds(type),
+    cut: false, halves: null,
+    x: fx, y: fy, vx:0, vy:0,
+    rot: rand(0, Math.PI*2), rotV: rand(-0.8, 0.8),
+    // Hovering params — sine-wave bob, stays on screen
+    floatX: fx, floatY: fy,
+    floatPhaseX: rand(0, Math.PI*2),
+    floatPhaseY: rand(0, Math.PI*2),
+    floatAmpX:  u * rand(0.15, 0.35),
+    floatAmpY:  u * rand(0.50, 0.90),
+  };
+}
+
+function makeIdleFruit(index) {
+  const u = Math.min(W,H)*0.08;
+  const type = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+  // Spread orbit centres evenly so fruits don't cluster
+  const cx = W * (0.20 + (index/5)*0.60);
+  const cy = H * rand(0.30, 0.60);
+  // Keep orbit radius small so fruit stays well within canvas
+  const orR = u * rand(0.9, 1.8);
+  return {
+    type, seeds: makeSeeds(type),
+    cut: false, halves: null,
+    x: cx, y: cy, vx:0, vy:0,
+    rot: rand(0, Math.PI*2), rotV: rand(-0.8, 0.8),
+    orbitCx: cx, orbitCy: cy,
+    orbitR:  orR,
+    orbitEcc: rand(0.45, 0.72),
+    orbitA:  rand(0, Math.PI*2),
+    orbitSpd: rand(0.30, 0.55) * (Math.random()<0.5?1:-1),
+  };
+}
+
+// ── Cut a fruit ───────────────────────────────────────
+function cutFruit(f) {
+  if (f.cut) return;
+  const u = Math.min(W,H)*0.08;
+  f.cut = true;
+  const ca = rand(-Math.PI*0.4, Math.PI*0.4);
+  const px = Math.cos(ca + Math.PI*0.5), py = Math.sin(ca + Math.PI*0.5);
+  const sep = f.type.r * u * 0.25;
+  f.halves = [0,1].map(side => {
+    const sign = side===0 ? -1 : 1;
+    return {
+      x:    f.x + px*sep*sign,  y:   f.y + py*sep*sign,
+      vx:   f.vx + px*u*2.5*sign + rand(-u*0.3,u*0.3),
+      vy:   f.vy + py*u*2.5*sign + rand(-u*0.3,u*0.3),
+      rot:  f.rot, rotV: f.rotV + sign*rand(2,4),
+      ca, side, life:1.0,
+    };
+  });
+  // Juice burst in fruit inner colour
+  for (let i=0; i<20; i++) {
+    const a = rand(0,Math.PI*2), sp = rand(u*1.2,u*7.5);
+    juices.push({ x:f.x, y:f.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-u*1.0,
+                  r:rand(u*0.05,u*0.16), color:f.type.inner, life:1.0 });
+  }
+  // Slash flash
+  slashes.push({ x:f.x, y:f.y, angle:ca, len:f.type.r*u*2.8, color:f.type.inner, life:1.0 });
+}
+
+// ── setState ──────────────────────────────────────────
+function setState(s) {
+  if (s === state) return;
+  state = s;
+  fruits=[]; juices=[]; slashes=[]; glints=[];
+  knife.active=false; knife.trail=[]; knife.hoverX=-200; knife.hoverY=-200;
+  nextCutIn=0; reticleA=0;
+
+  if (s === 'idle') {
+    for (let i=0; i<5; i++) fruits.push(makeIdleFruit(i));
+  } else if (s === 'waiting') {
+    const n=3;
+    for (let i=0; i<n; i++) fruits.push(makeWaitingFruit(i,n));
+  } else { // busy
+    // Pre-place 4 fruits at different points in their arc so the scene
+    // looks active immediately (simulate them having been launched already)
+    for (let i=0; i<4; i++) {
+      const f = makeFlyingFruit();
+      // Advance each fruit a random amount of time along its trajectory
+      const simT = rand(0.05, 0.80) * Math.sqrt(2 * H / G);
+      f.x  += f.vx * simT;
+      f.y  += f.vy * simT + 0.5 * G * simT * simT;
+      f.vy += G * simT;
+      f.rot += f.rotV * simT;
+      // If the simulated position is off-screen, just snap to a good spot
+      if (f.y < -f.type.r * Math.min(W,H)*0.08 || f.y > H + f.type.r * Math.min(W,H)*0.08) {
+        const u = Math.min(W,H)*0.08;
+        f.y  = H * rand(0.12, 0.68);
+        f.vy = rand(-u*8, u*3);
+      }
+      fruits.push(f);
+    }
+  }
+}
+
+// ── Trigger a knife swipe at a target fruit ───────────
+function startSwipe(tgt) {
+  const u   = Math.min(W,H)*0.08;
+  const fr  = tgt.type.r * u;
+  // Swipe direction: mostly horizontal with slight angle variation
+  const dir = rand(-Math.PI*0.25, Math.PI*0.25);
+  const len = fr*3.8 + u*1.2;
+  knife.sx  = tgt.x - Math.cos(dir)*len;
+  knife.sy  = tgt.y - Math.sin(dir)*len;
+  knife.ex  = tgt.x + Math.cos(dir)*len;
+  knife.ey  = tgt.y + Math.sin(dir)*len;
+  knife.angle   = dir;
+  knife.p       = 0;
+  knife.active  = true;
+  knife.hitDone = false;
+  knife.trail   = [];
+}
+
+// ── Main loop ─────────────────────────────────────────
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((ts-lastTs)/1000, 0.05);
+  lastTs = ts; t += dt;
+  const u = Math.min(W,H)*0.08;
+
+  // ── Fruit update ──────────────────────────────────
+  if (state === 'idle') {
+    fruits.forEach(f => {
+      f.orbitA += f.orbitSpd * dt;
+      f.x = f.orbitCx + Math.cos(f.orbitA) * f.orbitR;
+      f.y = f.orbitCy + Math.sin(f.orbitA) * f.orbitR * f.orbitEcc;
+      f.rot += f.rotV * dt;
+    });
+
+  } else if (state === 'waiting') {
+    fruits.forEach(f => {
+      // Bob in place with sine wave — never falls off screen
+      f.x   = f.floatX + Math.sin(t*0.9 + f.floatPhaseX) * f.floatAmpX;
+      f.y   = f.floatY + Math.sin(t*1.2 + f.floatPhaseY) * f.floatAmpY;
+      f.rot += f.rotV * dt;
+    });
+
+  } else { // busy
+    fruits = fruits.filter(f => {
+      if (!f.cut) {
+        f.x += f.vx*dt; f.y += f.vy*dt; f.vy += G*dt; f.rot += f.rotV*dt;
+        // Wrap: when fruit leaves top, respawn from bottom (not "remove")
+        if (f.y > H + u*4) return false;
+      } else {
+        let alive = false;
+        f.halves?.forEach(h => {
+          h.x += h.vx*dt; h.y += h.vy*dt; h.vy += G*dt;
+          h.rot += h.rotV*dt; h.life -= dt*0.65;
+          if (h.life>0 && h.y < H+u*5) alive=true;
+        });
+        if (!alive) return false;
+      }
+      return true;
+    });
+    // Spawn new flying fruits to keep 4–6 alive
+    const uncut = fruits.filter(f=>!f.cut).length;
+    if (uncut < 5 && Math.random() < dt*1.6) fruits.push(makeFlyingFruit());
+  }
+
+  // ── Knife: busy mode swipe ─────────────────────────
+  if (state === 'busy') {
+    if (knife.active) {
+      knife.p += dt / SWIPE_DUR;
+      if (knife.p >= 1) { knife.p=1; knife.active=false; }
+
+      const ep  = easeOut(knife.p);         // eased position progress
+      const kx  = lerp(knife.sx, knife.ex, ep);
+      const ky  = lerp(knife.sy, knife.ey, ep);
+
+      knife.trail.push({ x:kx, y:ky, life:1.0, p:knife.p });
+      if (knife.trail.length > 22) knife.trail.shift();
+
+      // Cut any fruit the blade tip passes through (check near midpoint of swipe)
+      if (!knife.hitDone && knife.p > 0.35 && knife.p < 0.75) {
+        fruits.forEach(f => {
+          if (f.cut) return;
+          const dx = kx-f.x, dy = ky-f.y;
+          if (Math.sqrt(dx*dx+dy*dy) < f.type.r*u*1.25) {
+            cutFruit(f); knife.hitDone=true;
+          }
+        });
+      }
+    } else {
+      knife.trail = knife.trail.filter(p => { p.life -= dt*6; return p.life>0; });
+    }
+
+    // Schedule next swipe
+    nextCutIn -= dt;
+    if (nextCutIn <= 0 && !knife.active) {
+      const onScreen = fruits.filter(f =>
+        !f.cut && f.y > u*0.5 && f.y < H*0.85 && f.x > u*0.5 && f.x < W-u*0.5
+      );
+      if (onScreen.length > 0) {
+        startSwipe(onScreen[Math.floor(Math.random()*onScreen.length)]);
+        nextCutIn = rand(0.30, 0.65);
+      } else {
+        nextCutIn = 0.15;
+      }
+    }
+  }
+
+  // ── Knife: waiting mode hover ─────────────────────
+  if (state === 'waiting') {
+    const tgt = fruits[0];
+    if (tgt) {
+      // Knife hovers near the target, trembling slightly (ready to strike)
+      const baseX = tgt.x + u*2.5;
+      const baseY = tgt.y - u*0.8;
+      const wobble = Math.sin(t*8)*u*0.06;
+      knife.hoverX     = baseX + wobble;
+      knife.hoverY     = baseY + Math.sin(t*0.9)*u*0.2;
+      knife.hoverAngle = -Math.PI*0.5 + Math.sin(t*6)*0.08; // mostly pointing down
+    }
+    reticleA += dt*1.6;
+  }
+
+  // ── Juice & particles ─────────────────────────────
+  juices = juices.filter(j => {
+    j.x+=j.vx*dt; j.y+=j.vy*dt; j.vy+=G*0.48*dt; j.life-=dt*1.9;
+    return j.life>0 && j.y < H+u*2;
+  });
+  slashes = slashes.filter(s => { s.life-=dt*4.5; return s.life>0; });
+
+  // Idle glints
+  if (state==='idle' && Math.random()<dt*2.0 && glints.length<12) {
+    const ft = FRUITS[Math.floor(Math.random()*FRUITS.length)];
+    glints.push({ x:rand(W*0.1,W*0.9), y:rand(H*0.1,H*0.75),
+      vx:rand(-u*0.2,u*0.2), vy:rand(-u*0.5,-u*0.15),
+      sz:rand(u*0.05,u*0.12), color:ft.inner, life:1.0 });
+  }
+  glints = glints.filter(g => { g.x+=g.vx*dt; g.y+=g.vy*dt; g.life-=dt*0.70; return g.life>0; });
+
+  draw(u);
+}
+
+// ── Draw ──────────────────────────────────────────────
+function draw(u) {
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#06060f'; ctx.fillRect(0,0,W,H);
+
+  // State-tinted bloom
+  const tints={busy:'#ff2233',waiting:'#ffcc00',idle:'#33ee77'};
+  const bg=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.75);
+  bg.addColorStop(0, rgba(tints[state],0.06));
+  bg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+  // ── Juice ─────────────────────────────────────────
+  juices.forEach(j => {
+    glow(j.color, u*0.38);
+    ctx.fillStyle=rgba(j.color, j.life*0.78);
+    ctx.beginPath(); ctx.arc(j.x,j.y, Math.max(0.5,j.r*(0.4+j.life*0.6)),0,Math.PI*2); ctx.fill();
+  }); noGlow();
+
+  // ── Fruits ────────────────────────────────────────
+  fruits.forEach(f => {
+    if (!f.cut) drawWhole(f,u);
+    else f.halves?.forEach(h => drawHalf(f,h,u));
+  });
+
+  // ── Slash flash ───────────────────────────────────
+  slashes.forEach(s => {
+    const op=s.life;
+    glow('#ffffff',u*op*2.0);
+    ctx.strokeStyle=`rgba(255,255,255,${op*0.88})`;
+    ctx.lineWidth=u*0.12*op; ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(s.x-Math.cos(s.angle)*s.len, s.y-Math.sin(s.angle)*s.len);
+    ctx.lineTo(s.x+Math.cos(s.angle)*s.len, s.y+Math.sin(s.angle)*s.len);
+    ctx.stroke();
+    // Fruit-colour juice burst ring
+    glow(s.color,u*s.life*1.5);
+    ctx.strokeStyle=rgba(s.color,op*0.55); ctx.lineWidth=u*0.06*op;
+    ctx.beginPath(); ctx.arc(s.x,s.y,u*s.life*0.9,0,Math.PI*2); ctx.stroke();
+    noGlow();
+  });
+
+  // ── Knife & blade trail (busy) ────────────────────
+  if (state==='busy') drawKnifeBusy(u);
+
+  // ── Hovering knife (waiting) ──────────────────────
+  if (state==='waiting') drawKnifeHover(u);
+
+  // ── Waiting: reticle + dots ───────────────────────
+  if (state==='waiting') drawWaitingUI(u);
+
+  // ── Idle: sparkle glints ──────────────────────────
+  if (state==='idle') drawGlints(u);
+}
+
+// ── Knife: busy mode ─────────────────────────────────
+function drawKnifeBusy(u) {
+  // 1. Blade trail (fading arc of light)
+  if (knife.trail.length > 1) {
+    for (let i=1; i<knife.trail.length; i++) {
+      const p0=knife.trail[i-1], p1=knife.trail[i];
+      const frac=i/knife.trail.length;
+      const op=p1.life*frac*0.72;
+      ctx.strokeStyle=`rgba(210,240,255,${op})`;
+      ctx.lineWidth=u*0.18*frac;
+      ctx.lineCap='round';
+      glow('#a0ccff',u*p1.life*1.2);
+      ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke();
+    }
+    noGlow();
+  }
+
+  // 2. Knife body — drawn at tip of active swipe
+  if (knife.active && knife.p < 0.98) {
+    const ep = easeOut(knife.p);
+    const kx = lerp(knife.sx, knife.ex, ep);
+    const ky = lerp(knife.sy, knife.ey, ep);
+    drawKnifeShape(kx, ky, knife.angle, u, 1.0);
+  }
+}
+
+// ── Knife: waiting mode (hover) ───────────────────────
+function drawKnifeHover(u) {
+  drawKnifeShape(knife.hoverX, knife.hoverY, knife.hoverAngle, u, 0.82);
+}
+
+// ── Draw the knife shape ──────────────────────────────
+// (cx,cy) = pivot of handle, angle = direction blade points
+function drawKnifeShape(cx, cy, angle, u, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+
+  // ── Handle ────────────────────────────────────────
+  const hW=u*0.75, hH=u*0.30;
+  // Handle base wrap (dark wood)
+  ctx.fillStyle='#3a2010';
+  ctx.beginPath();
+  ctx.roundRect(-hW*0.5, -hH*0.5, hW, hH, u*0.08);
+  ctx.fill();
+  // Wrap bands
+  ctx.strokeStyle='rgba(0,0,0,0.45)'; ctx.lineWidth=u*0.055;
+  for (let i=0; i<3; i++) {
+    const bx=-hW*0.38+i*hW*0.30;
+    ctx.beginPath();
+    ctx.moveTo(bx,-hH*0.48); ctx.lineTo(bx, hH*0.48); ctx.stroke();
+  }
+  // Rivet dots
+  ctx.fillStyle='#8888aa';
+  [-hW*0.32, hW*0.18].forEach(bx => {
+    ctx.beginPath(); ctx.arc(bx,0,u*0.04,0,Math.PI*2); ctx.fill();
+  });
+
+  // ── Guard (bolster) ────────────────────────────────
+  ctx.fillStyle='#c0c0c8';
+  ctx.beginPath();
+  ctx.rect(hW*0.48, -hH*0.62, u*0.08, hH*1.24);
+  ctx.fill();
+
+  // ── Blade ─────────────────────────────────────────
+  // Shape: wide at guard, tapers to sharp tip
+  const bLen=u*2.0, bW=hH*0.95;
+  // Blade body gradient: root is darker, tip is brighter (steel sheen)
+  const bladeGrad=ctx.createLinearGradient(hW*0.52,0,hW*0.52+bLen,0);
+  bladeGrad.addColorStop(0,'#b8b8c8');
+  bladeGrad.addColorStop(0.5,'#e0e0f0');
+  bladeGrad.addColorStop(1,'#f5f5ff');
+  glow('#d8e8ff',u*0.7);
+  ctx.fillStyle=bladeGrad;
+  ctx.beginPath();
+  ctx.moveTo(hW*0.52,  -bW*0.5);         // spine top at guard
+  ctx.lineTo(hW*0.52+bLen*0.92, -bW*0.10);// spine near tip
+  ctx.lineTo(hW*0.52+bLen,       0);       // sharp tip
+  ctx.lineTo(hW*0.52+bLen*0.82,  bW*0.38);// belly
+  ctx.lineTo(hW*0.52,  bW*0.5);           // belly at guard
+  ctx.closePath();
+  ctx.fill();
+  noGlow();
+
+  // Edge highlight (bright line along spine = sharp-looking)
+  glow('#ffffff',u*0.5);
+  ctx.strokeStyle='rgba(255,255,255,0.72)'; ctx.lineWidth=u*0.03; ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(hW*0.52,-bW*0.5);
+  ctx.lineTo(hW*0.52+bLen*0.92,-bW*0.10);
+  ctx.lineTo(hW*0.52+bLen,0);
+  ctx.stroke(); noGlow();
+
+  // Blade reflection stripe
+  ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=u*0.06;
+  ctx.beginPath();
+  ctx.moveTo(hW*0.56,-bW*0.22);
+  ctx.lineTo(hW*0.52+bLen*0.60,-bW*0.08);
+  ctx.stroke();
+
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+
+// ── Draw whole fruit ──────────────────────────────────
+function drawWhole(f, u) {
+  const {type,x,y,rot}=f;
+  const r=type.r*u;
+  ctx.save(); ctx.translate(x,y); ctx.rotate(rot);
+
+  glow(type.outer, r*0.68);
+  ctx.fillStyle=type.outer;
+  ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+
+  // Specular highlight (radial, top-left)
+  const hi=ctx.createRadialGradient(-r*0.30,-r*0.28,0,0,0,r);
+  hi.addColorStop(0,'rgba(255,255,255,0.38)');
+  hi.addColorStop(0.42,'rgba(255,255,255,0.05)');
+  hi.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=hi; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+
+  noGlow(); ctx.restore();
+}
+
+// ── Draw fruit half ───────────────────────────────────
+function drawHalf(f, half, u) {
+  const {type,seeds}=f;
+  const r=type.r*u;
+  const {x,y,rot,ca,side,life}=half;
+  if (life<=0) return;
+
+  ctx.save();
+  ctx.globalAlpha=Math.min(1,life*1.8);
+  ctx.translate(x,y); ctx.rotate(rot);
+
+  // Arc span: side 0 → [ca, ca+π],  side 1 → [ca+π, ca+2π]
+  const a1=side===0 ? ca       : ca+Math.PI;
+  const a2=side===0 ? ca+Math.PI : ca+Math.PI*2;
+
+  // Outer skin D-shape
+  glow(type.outer,r*0.50);
+  ctx.fillStyle=type.outer;
+  ctx.beginPath(); ctx.arc(0,0,r,a1,a2,false); ctx.closePath(); ctx.fill();
+  noGlow();
+
+  // Inner flesh
+  ctx.fillStyle=type.inner;
+  ctx.beginPath(); ctx.arc(0,0,r*0.87,a1,a2,false); ctx.closePath(); ctx.fill();
+
+  // Seeds
+  if (seeds.length>0 && type.seed) {
+    ctx.fillStyle=type.seed;
+    seeds.forEach(s=>{
+      const rel=((s.ang-a1)%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
+      if (rel>Math.PI) return;
+      const sx=Math.cos(s.ang)*s.dist*r*0.84;
+      const sy=Math.sin(s.ang)*s.dist*r*0.84;
+      ctx.beginPath();
+      type.name==='kiwi'
+        ? ctx.arc(sx,sy,r*s.rx,0,Math.PI*2)
+        : ctx.ellipse(sx,sy,r*s.rx,r*s.ry,s.ang+Math.PI*0.5,0,Math.PI*2);
+      ctx.fill();
+    });
+  }
+
+  // Flesh highlight
+  const fh=ctx.createRadialGradient(-r*0.10,-r*0.10,0,0,0,r*0.87);
+  fh.addColorStop(0,'rgba(255,255,255,0.20)');
+  fh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=fh;
+  ctx.beginPath(); ctx.arc(0,0,r*0.87,a1,a2,false); ctx.closePath(); ctx.fill();
+
+  // Cut-edge glow (the flat face)
+  glow(type.inner,r*0.50);
+  ctx.strokeStyle=rgba(type.inner,0.55);
+  ctx.lineWidth=r*0.11; ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(a1)*r*0.87, Math.sin(a1)*r*0.87);
+  ctx.lineTo(Math.cos(a2)*r*0.87, Math.sin(a2)*r*0.87);
+  ctx.stroke(); noGlow();
+
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// ── Waiting UI ────────────────────────────────────────
+function drawWaitingUI(u) {
+  const tgt=fruits[0];
+  if (tgt) {
+    const fr=tgt.type.r*u;
+    ctx.save(); ctx.translate(tgt.x,tgt.y);
+    // Rotating dashed reticle ring
+    glow('#ffcc00',u*1.0);
+    ctx.strokeStyle=rgba('#ffcc00', 0.38+0.28*Math.abs(Math.sin(t*2.5)));
+    ctx.lineWidth=u*0.09;
+    ctx.setLineDash([u*0.20,u*0.16]); ctx.lineDashOffset=-t*u*1.3;
+    ctx.beginPath(); ctx.arc(0,0,fr*2.0,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    // 4 spinning ticks
+    ctx.strokeStyle=rgba('#ffcc00',0.62); ctx.lineWidth=u*0.08;
+    for (let i=0; i<4; i++) {
+      const a=reticleA+(i/4)*Math.PI*2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a)*fr*1.65, Math.sin(a)*fr*1.65);
+      ctx.lineTo(Math.cos(a)*fr*2.05, Math.sin(a)*fr*2.05);
+      ctx.stroke();
+    }
+    noGlow(); ctx.restore();
+  }
+  // "..." loading dots at top
+  for (let i=0; i<3; i++) {
+    const ph=(t*1.25-i*0.42)%1.5;
+    const br=(ph>0&&ph<0.60)?Math.sin((ph/0.60)*Math.PI):0;
+    glow('#ffcc00',u*br*1.3);
+    ctx.fillStyle=rgba('#ffcc00',0.24+br*0.62);
+    ctx.beginPath(); ctx.arc(W/2+(i-1)*u*0.58, H*0.10, u*0.13*(0.72+br*0.28),0,Math.PI*2); ctx.fill();
+  }
+  noGlow();
+}
+
+// ── Idle glints ───────────────────────────────────────
+function drawGlints(u) {
+  glints.forEach(g => {
+    ctx.save(); ctx.translate(g.x,g.y); ctx.rotate(t*2.0+g.x*0.01);
+    glow(g.color,g.sz*2.5);
+    ctx.strokeStyle=rgba(g.color,g.life*0.78);
+    ctx.lineWidth=g.sz*0.26; ctx.lineCap='round';
+    for (let i=0;i<4;i++) {
+      const a=(i/4)*Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a)*g.sz*0.24, Math.sin(a)*g.sz*0.24);
+      ctx.lineTo(Math.cos(a)*g.sz,      Math.sin(a)*g.sz);
+      ctx.moveTo(-Math.cos(a)*g.sz*0.24,-Math.sin(a)*g.sz*0.24);
+      ctx.lineTo(-Math.cos(a)*g.sz,     -Math.sin(a)*g.sz);
+      ctx.stroke();
+    }
+    ctx.restore(); noGlow();
+  });
+}
+
+// ── State wiring ──────────────────────────────────────
+function handleState(s) {
+  if (s===lastState) return;
+  lastState=s; setState(s);
+}
+window.addEventListener('message', ({data:d}) => { if (d?.state) handleState(d.state); });
+async function poll() {
+  try { const d=await(await fetch('/api/status')).json(); if(d?.state) handleState(d.state); } catch {}
+}
+if (window.self===window.top) { setInterval(poll,250); poll(); }
+requestAnimationFrame(animate);
+handleState('idle');
+</script>
+</body>
+</html>
