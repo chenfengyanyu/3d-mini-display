@@ -41,7 +41,9 @@ function cancelIdle() {
   idleTimer = null;
 }
 
-function applyEvent(newState, lastEvent, sessionId) {
+// persistent=true  → stay yellow indefinitely (waiting for user to answer a question)
+// persistent=false → start 3s countdown to green (Claude finished its turn normally)
+function applyEvent(newState, lastEvent, sessionId, persistent = false) {
   if (newState === 'busy') {
     cancelIdle();                         // busy cancels any pending idle
     state.state     = 'busy';
@@ -53,7 +55,11 @@ function applyEvent(newState, lastEvent, sessionId) {
     state.lastEvent = lastEvent;
     state.sessionId = sessionId;
     state.updatedAt = Math.floor(Date.now() / 1000);
-    scheduleIdle();                       // start 3s countdown to green
+    if (persistent) {
+      cancelIdle();                       // stay yellow — user must reply first
+    } else {
+      scheduleIdle();                     // normal Stop: 3s countdown to green
+    }
   }
 }
 
@@ -100,8 +106,8 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
       try {
-        const { state: s, lastEvent, sessionId } = JSON.parse(body);
-        applyEvent(s, lastEvent || null, sessionId || null);
+        const { state: s, lastEvent, sessionId, persistent } = JSON.parse(body);
+        applyEvent(s, lastEvent || null, sessionId || null, persistent === true);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch {
