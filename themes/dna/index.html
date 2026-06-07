@@ -7,7 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    canvas { display: block; }
+    canvas { display: block; width: 100%; height: 100%; }
   </style>
 </head>
 <body>
@@ -18,33 +18,46 @@ const ctx    = canvas.getContext('2d');
 let W, H;
 
 function resize() {
-  W = canvas.width  = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  const dpr = window.devicePixelRatio || 1;
+  W = canvas.offsetWidth;
+  H = canvas.offsetHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener('resize', resize);
 resize();
 
 // ── Presets ───────────────────────────────────────────
 const PRESETS = {
-  busy:    { rotSpeed: 3.2,  cr1: 255, cg1:  48, cb1:   0,
-                              cr2: 255, cg2: 120, cb2:  20,
-             glowR: 150, glowG:  20, glowB:   0,
-             particles: 3.5, scanLine: false },
-  waiting: { rotSpeed: 1.1,  cr1: 255, cg1: 190, cb1:  10,
-                              cr2: 255, cg2: 230, cb2:  80,
-             glowR:  90, glowG:  70, glowB:   0,
-             particles: 0.5, scanLine: true  },
-  idle:    { rotSpeed: 0.35, cr1:  20, cg1: 220, cb1: 180,
-                              cr2:  80, cg2: 255, cb2: 200,
-             glowR:   0, glowG:  60, glowB:  70,
-             particles: 0,   scanLine: false },
+  busy: {
+    rotSpeed: 2.8,
+    // Strand 1: warm red, Strand 2: hot orange
+    s1r: 255, s1g: 55,  s1b: 30,
+    s2r: 255, s2g: 140, s2b: 0,
+    glowR: 160, glowG: 30, glowB: 0,
+    sparkRate: 4, scanLine: false,
+  },
+  waiting: {
+    rotSpeed: 1.0,
+    s1r: 255, s1g: 195, s1b: 10,
+    s2r: 255, s2g: 230, s2b: 80,
+    glowR: 110, glowG: 85, glowB: 0,
+    sparkRate: 0.6, scanLine: true,
+  },
+  idle: {
+    rotSpeed: 0.32,
+    s1r: 20,  s1g: 220, s1b: 175,
+    s2r: 90,  s2g: 255, s2b: 210,
+    glowR: 0, glowG: 65, glowB: 75,
+    sparkRate: 0, scanLine: false,
+  },
 };
 
-let curState  = 'idle';
+let curState = 'idle';
 let p = { ...PRESETS.idle };
 
 function lerp(a, b, t) { return a + (b - a) * t; }
-
 function applyLerp(dt) {
   const tgt = PRESETS[curState];
   const k = Math.min(dt * 2, 1);
@@ -55,41 +68,48 @@ function applyLerp(dt) {
 }
 
 // ── Helix config ──────────────────────────────────────
-const N_PAIRS = 20;      // base pairs visible
-const TURNS   = 2.5;     // full turns of helix
-let rotAngle  = 0;
-let scanY     = 0;       // scanning highlight y position (0–1)
+const N   = 22;      // number of base pairs
+const TURNS = 2.0;   // full helical turns across the full height
 
-// ── Particle system (busy: sparks fly off base pairs) ─
-const MAX_SPARKS = 120;
-const sx   = new Float32Array(MAX_SPARKS);
-const sy   = new Float32Array(MAX_SPARKS);
-const svx  = new Float32Array(MAX_SPARKS);
-const svy  = new Float32Array(MAX_SPARKS);
-const slife= new Float32Array(MAX_SPARKS);
-const sml  = new Float32Array(MAX_SPARKS);
-let   sparkHead = 0;
+let rotAngle = 0;
+let scanY    = 0;    // 0→1 position of scan band (waiting state)
+let pulse    = 0;    // idle breathing pulse
 
-function spawnSpark(ox, oy) {
-  const i = sparkHead % MAX_SPARKS;
-  sparkHead++;
-  sx[i]   = ox;
-  sy[i]   = oy;
-  const angle = Math.random() * Math.PI * 2;
-  const spd   = 30 + Math.random() * 80;
-  svx[i]  = Math.cos(angle) * spd;
-  svy[i]  = Math.sin(angle) * spd;
-  slife[i]= 0;
-  sml[i]  = 0.4 + Math.random() * 0.5;
+// ── Spark particles (busy state) ─────────────────────
+const MAX_SPARKS = 140;
+const spx  = new Float32Array(MAX_SPARKS);
+const spy  = new Float32Array(MAX_SPARKS);
+const spvx = new Float32Array(MAX_SPARKS);
+const spvy = new Float32Array(MAX_SPARKS);
+const spL  = new Float32Array(MAX_SPARKS);
+const spML = new Float32Array(MAX_SPARKS);
+let   spIdx = 0;
+
+function spark(ox, oy) {
+  const i = spIdx++ % MAX_SPARKS;
+  spx[i] = ox; spy[i] = oy;
+  const a = Math.random() * Math.PI * 2;
+  const v = 25 + Math.random() * 70;
+  spvx[i] = Math.cos(a) * v; spvy[i] = Math.sin(a) * v;
+  spL[i] = 0; spML[i] = 0.35 + Math.random() * 0.45;
 }
 
-// ── Pulse for idle breathing ──────────────────────────
-let pulse = 0;
-let pulseDir = 1;
-
-// ── Draw loop ─────────────────────────────────────────
-let lastTs = 0;
 let sparkAccum = 0;
+
+// ── Draw helpers ──────────────────────────────────────
+function drawGlowCircle(x, y, r, color, alpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.5);
+  g.addColorStop(0,   `rgba(255,255,255,${alpha * 0.95})`);
+  g.addColorStop(0.3, `rgba(${color},${alpha})`);
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+// ── Main frame ────────────────────────────────────────
+let lastTs = 0;
 
 function frame(ts) {
   requestAnimationFrame(frame);
@@ -99,119 +119,166 @@ function frame(ts) {
   applyLerp(dt);
   rotAngle += p.rotSpeed * dt;
 
-  // Pulse (idle breathing)
-  pulse += dt * pulseDir * 1.2;
-  if (pulse > 1)  { pulse = 1;  pulseDir = -1; }
-  if (pulse < 0)  { pulse = 0;  pulseDir =  1; }
+  // Pulse (idle breathing: 0→1→0, period ~3s)
+  pulse = (Math.sin(ts / 1500) + 1) * 0.5;
 
   // Scan line position (waiting)
-  scanY = (scanY + dt * 0.4) % 1;
+  scanY = (scanY + dt * 0.35) % 1;
 
-  // Clear
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  // Clear + subtle glow
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
   ctx.fillRect(0, 0, W, H);
 
-  // Centre glow
   const cx   = W * 0.5;
-  const bg   = ctx.createRadialGradient(cx, H * 0.5, 0, cx, H * 0.5, Math.min(W, H) * 0.6);
-  const ga   = curState === 'idle' ? 0.08 + pulse * 0.06 : 0.15;
+  const bg   = ctx.createRadialGradient(cx, H * 0.5, 0, cx, H * 0.5, Math.min(W, H) * 0.55);
+  const ga   = curState === 'idle' ? 0.07 + pulse * 0.05 : 0.14;
   bg.addColorStop(0, `rgba(${~~p.glowR},${~~p.glowG},${~~p.glowB},${ga})`);
   bg.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // ── Build base-pair list ─────────────────────────────
-  const radius = Math.min(W, H) * 0.26;
-  const topY   = H * 0.04;
-  const botY   = H * 0.96;
-  const unit   = Math.min(W, H) / 400;
+  // ── Compute base-pair positions ─────────────────────
+  const R     = Math.min(W, H) * 0.24;  // helix radius
+  const topY  = H * 0.05;
+  const botY  = H * 0.95;
+  const unit  = Math.min(W, H) / 420;
 
-  const bps = [];
-  for (let i = 0; i < N_PAIRS; i++) {
-    const frac  = i / (N_PAIRS - 1);
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    const frac  = i / (N - 1);
     const y     = topY + frac * (botY - topY);
     const theta = rotAngle + frac * Math.PI * 2 * TURNS;
-    const depth = Math.cos(theta);          // -1 (back) to +1 (front)
-    const x1    = cx + radius * Math.sin(theta);
-    const x2    = cx - radius * Math.sin(theta);
-    bps.push({ y, theta, depth, x1, x2, frac });
+    const sinT  = Math.sin(theta);
+    const cosT  = Math.cos(theta);
+    // Strand 1 and Strand 2 are 180° apart around the Y axis
+    pts.push({
+      y, frac, theta,
+      x1: cx + R * sinT,  depth1: cosT,   // strand 1
+      x2: cx - R * sinT,  depth2: -cosT,  // strand 2 (180° offset)
+    });
   }
 
-  // Sort back-to-front
-  bps.sort((a, b) => a.depth - b.depth);
-
-  // ── Spark spawn ──────────────────────────────────────
-  sparkAccum += p.particles * dt;
-  while (sparkAccum > 1) {
+  // ── Spawn sparks ─────────────────────────────────────
+  sparkAccum += p.sparkRate * dt;
+  while (sparkAccum >= 1) {
     sparkAccum -= 1;
-    const bp = bps[~~(Math.random() * N_PAIRS)];
-    spawnSpark(Math.random() < 0.5 ? bp.x1 : bp.x2, bp.y);
+    const bp = pts[~~(Math.random() * N)];
+    spark(Math.random() < 0.5 ? bp.x1 : bp.x2, bp.y);
   }
 
-  // ── Draw sparks ──────────────────────────────────────
+  // ── Render in TWO PASSES (back → front) ─────────────
+  // We render: back backbone lines → front backbone lines → dots
+  // This gives proper z-depth on the helix twist.
+
+  const s1r = ~~p.s1r, s1g = ~~p.s1g, s1b = ~~p.s1b;
+  const s2r = ~~p.s2r, s2g = ~~p.s2g, s2b = ~~p.s2b;
+
   ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < MAX_SPARKS; i++) {
-    if (sml[i] === 0) continue;
-    slife[i] += dt;
-    if (slife[i] >= sml[i]) { sml[i] = 0; continue; }
-    const t  = slife[i] / sml[i];
-    const a  = (1 - t) * 0.7;
-    sx[i]   += svx[i] * dt;
-    sy[i]   += svy[i] * dt;
-    svy[i]  += 60 * dt;      // gravity
-    const r = unit * 1.5 * (1 - t * 0.7);
-    ctx.beginPath();
-    ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${~~p.cr2},${~~p.cg2},${~~p.cb2},${a})`;
-    ctx.fill();
+
+  // ── PASS 1: backbone segments ────────────────────────
+  // For each consecutive pair of base pairs, draw the strand backbone.
+  // Draw segments in depth order (back first, then front) so front crosses
+  // visually appear on top of back — this is what creates the helix twist look.
+
+  // Collect all backbone segments (strand 1 and strand 2) with average depth
+  const segs = [];
+  for (let i = 0; i < N - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    // Strand 1 segment
+    segs.push({ ax: a.x1, ay: a.y, bx: b.x1, by: b.y,
+                 depth: (a.depth1 + b.depth1) * 0.5,
+                 r: s1r, g: s1g, bl: s1b });
+    // Strand 2 segment
+    segs.push({ ax: a.x2, ay: a.y, bx: b.x2, by: b.y,
+                 depth: (a.depth2 + b.depth2) * 0.5,
+                 r: s2r, g: s2g, bl: s2b });
   }
+  // Sort back to front
+  segs.sort((a, b) => a.depth - b.depth);
 
-  // ── Draw helix ───────────────────────────────────────
-  ctx.globalCompositeOperation = 'lighter';
-
-  for (const bp of bps) {
-    const tf = (bp.depth + 1) * 0.5;    // 0 = back, 1 = front
-    const alpha = 0.25 + tf * 0.75;
-    const dotR  = unit * (1.5 + tf * 3.5);
-    const baseAlpha = alpha * (curState === 'idle' ? 0.6 + pulse * 0.4 : 1);
+  for (const seg of segs) {
+    const tf = (seg.depth + 1) * 0.5;       // 0 = back, 1 = front
+    const alpha = 0.18 + tf * 0.72;
+    const lw    = unit * (0.8 + tf * 2.2);
 
     // Scan highlight (waiting)
-    let scanBoost = 0;
+    let boost = 0;
     if (p.scanLine) {
-      const dist = Math.abs(bp.frac - scanY);
-      scanBoost  = Math.max(0, 1 - dist * 12) * 0.8;
+      const midFrac = ((pts.findIndex(p => p.x1 === seg.ax || p.x2 === seg.ax)) / N + 0.5 / N);
+      boost = Math.max(0, 1 - Math.abs(midFrac - scanY) * 10) * 0.65;
     }
 
-    const r1 = ~~p.cr1, g1 = ~~p.cg1, b1 = ~~p.cb1;
-    const r2 = ~~p.cr2, g2 = ~~p.cg2, b2 = ~~p.cb2;
+    const a = Math.min(alpha + boost, 1);
+    ctx.lineWidth   = lw;
+    ctx.shadowColor = `rgba(${seg.r},${seg.g},${seg.bl},${a * 0.6})`;
+    ctx.shadowBlur  = unit * (4 + tf * 8);
+    ctx.strokeStyle = `rgba(${seg.r},${seg.g},${seg.bl},${a})`;
+    ctx.beginPath();
+    ctx.moveTo(seg.ax, seg.ay);
+    ctx.lineTo(seg.bx, seg.by);
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
 
-    // Base pair connecting line
-    const lineA = baseAlpha * 0.35 * tf + scanBoost * 0.5;
-    if (lineA > 0.01) {
+  // ── PASS 2: base pair rungs + dots ────────────────────
+  // Sort base pairs back to front so front dots draw over back ones
+  const sortedPts = [...pts].sort((a, b) => a.depth1 - b.depth1);
+
+  for (const bp of sortedPts) {
+    const tf1 = (bp.depth1 + 1) * 0.5;   // 0=back 1=front (strand 1 perspective)
+    const tf2 = (bp.depth2 + 1) * 0.5;
+
+    // Idle breathing modulates opacity
+    const breathMod = curState === 'idle' ? 0.55 + pulse * 0.45 : 1;
+
+    // Scan highlight
+    let scanBoost = 0;
+    if (p.scanLine) {
+      scanBoost = Math.max(0, 1 - Math.abs(bp.frac - scanY) * 11) * 0.8;
+    }
+
+    // ── Base pair rung (connecting line) ────────────────
+    const rungTf = (tf1 + tf2) * 0.5;
+    const rungA  = (0.12 + rungTf * 0.35) * breathMod + scanBoost * 0.4;
+    if (rungA > 0.02) {
       const lg = ctx.createLinearGradient(bp.x1, bp.y, bp.x2, bp.y);
-      lg.addColorStop(0,   `rgba(${r1},${g1},${b1},${lineA})`);
-      lg.addColorStop(0.5, `rgba(255,255,255,${lineA * 0.6 + scanBoost * 0.4})`);
-      lg.addColorStop(1,   `rgba(${r2},${g2},${b2},${lineA})`);
-      ctx.lineWidth  = unit * (0.8 + tf * 1.2);
+      lg.addColorStop(0,   `rgba(${s1r},${s1g},${s1b},${rungA})`);
+      lg.addColorStop(0.5, `rgba(255,255,255,${rungA * 0.55 + scanBoost * 0.35})`);
+      lg.addColorStop(1,   `rgba(${s2r},${s2g},${s2b},${rungA})`);
+      ctx.lineWidth   = unit * (0.5 + rungTf * 0.9);
       ctx.strokeStyle = lg;
+      ctx.shadowBlur  = 0;
       ctx.beginPath();
       ctx.moveTo(bp.x1, bp.y);
       ctx.lineTo(bp.x2, bp.y);
       ctx.stroke();
     }
 
-    // Strand dots with glow
-    for (const [dx, rx, gx, bx] of [[bp.x1, r1, g1, b1], [bp.x2, r2, g2, b2]]) {
-      const a = baseAlpha + scanBoost;
-      const glow = ctx.createRadialGradient(dx, bp.y, 0, dx, bp.y, dotR * 2.5);
-      glow.addColorStop(0,   `rgba(255,255,255,${a * 0.9})`);
-      glow.addColorStop(0.3, `rgba(${rx},${gx},${bx},${a})`);
-      glow.addColorStop(1,   'rgba(0,0,0,0)');
-      ctx.beginPath();
-      ctx.arc(dx, bp.y, dotR * 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = glow;
-      ctx.fill();
-    }
+    // ── Strand 1 dot ─────────────────────────────────────
+    const dotR1 = unit * (1.2 + tf1 * 3.2);
+    const a1    = (0.2 + tf1 * 0.8) * breathMod + scanBoost;
+    drawGlowCircle(bp.x1, bp.y, dotR1, `${s1r},${s1g},${s1b}`, a1);
+
+    // ── Strand 2 dot ─────────────────────────────────────
+    const dotR2 = unit * (1.2 + tf2 * 3.2);
+    const a2    = (0.2 + tf2 * 0.8) * breathMod + scanBoost;
+    drawGlowCircle(bp.x2, bp.y, dotR2, `${s2r},${s2g},${s2b}`, a2);
+  }
+
+  // ── Sparks ────────────────────────────────────────────
+  for (let i = 0; i < MAX_SPARKS; i++) {
+    if (spML[i] === 0) continue;
+    spL[i] += dt;
+    if (spL[i] >= spML[i]) { spML[i] = 0; continue; }
+    const t = spL[i] / spML[i];
+    spx[i] += spvx[i] * dt;
+    spy[i] += spvy[i] * dt;
+    spvy[i] += 55 * dt;   // gravity
+    const r = unit * 1.4 * (1 - t);
+    ctx.beginPath();
+    ctx.arc(spx[i], spy[i], r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${s2r},${s2g},${s2b},${(1 - t) * 0.75})`;
+    ctx.fill();
   }
 
   ctx.globalCompositeOperation = 'source-over';

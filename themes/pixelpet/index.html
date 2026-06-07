@@ -253,8 +253,12 @@ const SPR_W = 16;       // sprite logical width
 const SPR_H = 18;       // sprite logical height
 const CW = 240;         // canvas width  (px)
 const CH = 220;         // canvas height (px)
-canvas.width  = CW;
-canvas.height = CH;
+const _dpr = window.devicePixelRatio || 1;
+canvas.width  = CW * _dpr;
+canvas.height = CH * _dpr;
+canvas.style.width  = CW + 'px';
+canvas.style.height = CH + 'px';
+ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
 ctx.imageSmoothingEnabled = false;
 
 // ─────────────────────────────────────────────

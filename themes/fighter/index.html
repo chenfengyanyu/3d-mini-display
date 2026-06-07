@@ -19,8 +19,10 @@ const ctx    = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
 function resize() {
-  canvas.width  = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
+  const _dpr = window.devicePixelRatio || 1;
+  canvas.width  = canvas.clientWidth  * _dpr;
+  canvas.height = canvas.clientHeight * _dpr;
+  ctx.setTransform(_dpr, 0, 0, _dpr, 0, 0);
 }
 resize();
 window.addEventListener('resize', resize);
@@ -352,7 +354,7 @@ function drawStar5(cx, cy, r, color, alpha) {
 
 // ── Background drawing ────────────────────────────────────────────────────────
 function drawBackground() {
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
 
   // Sky gradient based on state
   let skyTop, skyBot;
@@ -409,7 +411,7 @@ function drawBackground() {
 }
 
 function drawCrowd(floorY) {
-  const W = canvas.width;
+  const W = canvas.clientWidth;
   // Simple crowd heads silhouetted in the background
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   const crowdY = floorY - 20;
@@ -427,7 +429,7 @@ function drawCrowd(floorY) {
 
 // ── HUD drawing ───────────────────────────────────────────────────────────────
 function drawHUD() {
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
   const HUD_H = Math.max(44, H * 0.09);
   const barW   = W * 0.33;
   const barH   = Math.max(10, HUD_H * 0.22);
@@ -509,7 +511,7 @@ function drawHUD() {
 // ── Combo counter ─────────────────────────────────────────────────────────────
 function drawCombo() {
   if (comboDisplay < 2 || comboAlpha <= 0) return;
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
   const HUD_H = Math.max(44, H * 0.09);
   const cx = W * 0.72;
   const cy = HUD_H + H * 0.22;
@@ -562,7 +564,7 @@ function getSprite() {
 }
 
 function drawFighters() {
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
   const HUD_H = Math.max(44, H * 0.09);
   const floorY = H * 0.72;
   const scale  = Math.max(2, Math.floor(Math.min(W, H) / 80));
@@ -655,7 +657,7 @@ function updateAndDrawStars() {
 // ── "PERFECT!" big text ───────────────────────────────────────────────────────
 function drawVictoryText() {
   if (curState !== 'idle') return;
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
   const t = Math.sin(frame * 0.12);
   const sz = Math.max(24, W * 0.07) + t * 4;
   ctx.save();
@@ -699,7 +701,7 @@ function loop(ts) {
     }
     // Spawn sparks at impact point every combo step
     if (frame % 10 === 0) {
-      const W = canvas.width, H = canvas.height;
+      const W = canvas.clientWidth, H = canvas.clientHeight;
       const floorY = H * 0.72;
       const scale  = Math.max(2, Math.floor(Math.min(W, H) / 80));
       const sw = 16 * scale;
@@ -719,7 +721,7 @@ function loop(ts) {
 
   // Victory sparkle burst
   if (curState === 'idle' && frame % 20 === 0) {
-    const W = canvas.width, H = canvas.height;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
     spawnStars(W * 0.22, H * 0.55, 3);
   }
 
