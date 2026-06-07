@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PixelPet — Claude Status</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0a0a0a;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─────────────────────────────────────────────
+//  PIXEL ART SPRITE DEFINITIONS
+//  Each sprite is a 2D array [row][col] of color
+//  strings or null (transparent).
+//  Cat is 16 wide × 18 tall logical pixels.
+// ─────────────────────────────────────────────
+const O = null; // transparent
+const H = '#FF8C00'; // orange body
+const D = '#FF6600'; // dark orange / stripes
+const W = '#FFD700'; // belly / chest
+const P = '#FF9999'; // pink inner ear / nose
+const E = '#222222'; // eyes
+const B = '#333333'; // stripe / outline
+const G = '#AAAAAA'; // grey whisker hint
+const R = '#FF3333'; // red (monitor glow)
+const K = '#555555'; // keyboard dark
+const L = '#888888'; // keyboard light
+const T = '#FFEECC'; // light cream
+const Z = '#FFFFFF'; // white zzz
+
+// ── BUSY frames: cat sitting at keyboard, paws typing ──────────────────────
+// Frame 0: left paw up, right paw down
+const BUSY0 = [
+  //0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O], // 0
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O], // 1
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O], // 2
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O], // 3  ears
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O], // 4
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O], // 5
+  [ O,   O,   B,   H,   E,   H,   H,   H,   H,   H,   E,   H,   B,   O,   O,   O], // 6  eyes
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O], // 7  nose
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O], // 8  chest
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O], // 9
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O], // 10 belly stripes
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O], // 11
+  [ O,   B,   H,   H,   O,   O,   O,   O,   O,   O,   O,   H,   H,   B,   O,   O], // 12 arms out
+  [ O,   B,   H,   O,   O,   O,   O,   O,   O,   O,   O,   O,   H,   B,   O,   O], // 13 left paw UP
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O], // 14 hips
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O], // 15 legs
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O], // 16 feet
+  [ O,   O,   O,   O,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O], // 17
+];
+
+// Frame 1: right paw up, left paw down
+const BUSY1 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   E,   H,   H,   H,   H,   H,   E,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   O,   O,   O,   O,   O,   O,   O,   H,   H,   B,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   H,   B,   O,   O], // right paw UP
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   O,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O],
+];
+
+// ── WAITING frames: sitting, tail swinging ─────────────────────────────────
+// Frame 0: tail left
+const WAIT0 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   B,   B,   H,   H,   H,   H,   B,   B,   B,   O,   O,   O], // half-closed bored eyes
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O], // arms resting
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   O,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O], // tail left
+  [ O,   B,   H,   H,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+// Frame 1: tail center
+const WAIT1 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   B,   B,   H,   H,   H,   H,   B,   B,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O], // tail center (curls down)
+  [ O,   O,   O,   O,   B,   H,   B,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+// Frame 2: tail right
+const WAIT2 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   B,   B,   H,   H,   H,   H,   B,   B,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   O,   B,   B,   O,   O,   O,   O,   B,   B,   B,   O,   O,   O], // tail right
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   H,   B,   O,   O,   O],
+];
+
+// Waiting lick frames (paw raised to face)
+const WAIT_LICK0 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   B,   B,   H,   H,   H,   H,   B,   B,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O], // left arm raised
+  [ O,   B,   H,   O,   O,   O,   O,   O,   O,   O,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   B,   H,   B,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+const WAIT_LICK1 = [
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   D,   H,   H,   H,   D,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   P,   H,   H,   H,   H,   H,   H,   H,   P,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   B,   B,   H,   H,   H,   H,   B,   B,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   P,   H,   P,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O], // paw at face
+  [ O,   B,   H,   H,   W,   W,   W,   W,   W,   W,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   W,   D,   W,   D,   W,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   B,   H,   H,   H,   H,   B,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   B,   H,   H,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   B,   B,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   B,   H,   B,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+// ── IDLE frames: cat curled up sleeping ────────────────────────────────────
+// Sleeping cat — curled tight, 16x14 logical pixels
+const IDLE0 = [
+  //0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O,   O],
+  [ O,   B,   H,   D,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   B,   B,   H,   H,   H,   B,   B,   H,   H,   B,   O,   O], // closed eyes (sleeping)
+  [ O,   B,   H,   H,   H,   H,   P,   H,   H,   H,   H,   H,   H,   B,   O,   O], // tiny nose
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   W,   D,   W,   D,   W,   D,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   B,   H,   B,   O,   O], // tail wraps
+  [ O,   O,   O,   O,   B,   H,   H,   H,   H,   H,   B,   H,   H,   H,   B,   O],
+  [ O,   O,   O,   O,   O,   B,   B,   B,   B,   B,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+// Frame 1: slight inhale (body 1 pixel taller at belly)
+const IDLE1 = [
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+  [ O,   O,   O,   B,   B,   B,   B,   B,   B,   B,   B,   O,   O,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O,   O],
+  [ O,   B,   H,   D,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   B,   B,   H,   H,   H,   B,   B,   H,   H,   B,   O,   O],
+  [ O,   B,   H,   H,   H,   H,   P,   H,   H,   H,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O],
+  [ O,   O,   B,   W,   W,   W,   W,   W,   W,   W,   W,   W,   B,   O,   O,   O], // belly puffed
+  [ O,   O,   B,   H,   W,   D,   W,   D,   W,   D,   W,   H,   B,   O,   O,   O],
+  [ O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   B,   H,   H,   H,   H,   H,   H,   H,   B,   H,   B,   O,   O],
+  [ O,   O,   O,   O,   B,   H,   H,   H,   H,   H,   B,   H,   H,   H,   B,   O],
+  [ O,   O,   O,   O,   O,   B,   B,   B,   B,   B,   H,   H,   H,   B,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   B,   H,   H,   B,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   B,   B,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+  [ O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O,   O],
+];
+
+// ─────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const SCALE = 8;        // each logical pixel = 8×8 physical pixels
+const SPR_W = 16;       // sprite logical width
+const SPR_H = 18;       // sprite logical height
+const CW = 240;         // canvas width  (px)
+const CH = 220;         // canvas height (px)
+canvas.width  = CW;
+canvas.height = CH;
+ctx.imageSmoothingEnabled = false;
+
+// ─────────────────────────────────────────────
+//  STATE MACHINE
+// ─────────────────────────────────────────────
+let curState = 'idle';
+function handleState(s) {
+  if (!['busy', 'waiting', 'idle'].includes(s) || s === curState) return;
+  curState = s;
+  frameIdx = 0;
+  lickTimer = 0;
+  licking = false;
+  zBubbles = [];
+}
+
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+// ─────────────────────────────────────────────
+//  ANIMATION STATE
+// ─────────────────────────────────────────────
+let frameIdx   = 0;
+let lastTime   = 0;
+let lickTimer  = 0;      // ms since last lick
+let licking    = false;
+let lickFrame  = 0;
+let lickDelay  = 4500 + Math.random() * 1500; // 4-6s
+let zBubbles   = [];     // [{x, y, alpha, size}]
+let zTimer     = 0;
+
+const BUSY_FRAMES  = [BUSY0, BUSY1];
+const WAIT_FRAMES  = [WAIT0, WAIT1, WAIT2];
+const LICK_FRAMES  = [WAIT_LICK0, WAIT_LICK1, WAIT_LICK0, WAIT1];
+const IDLE_FRAMES  = [IDLE0, IDLE1];
+
+const BUSY_MS  = 80;
+const WAIT_MS  = 220;
+const IDLE_MS  = 500;
+
+// ─────────────────────────────────────────────
+//  PIXEL FONT (3×5 uppercase)
+// ─────────────────────────────────────────────
+const FONT = {
+  B:[[1,1,0],[1,1,0],[1,1,1],[1,0,1],[1,1,1]],
+  U:[[1,0,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+  S:[[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+  Y:[[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+  W:[[1,0,1],[1,0,1],[1,1,1],[1,1,1],[1,0,1]],
+  A:[[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  I:[[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  T:[[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+  N:[[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  G:[[0,1,1],[1,0,0],[1,0,1],[1,0,1],[0,1,1]],
+  D:[[1,1,0],[1,0,1],[1,0,1],[1,0,1],[1,1,0]],
+  L:[[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+  E:[[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+  Z:[[1,1,1],[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+};
+
+function drawText(text, x, y, color, scale=2) {
+  ctx.fillStyle = color;
+  let cx = x;
+  for (const ch of text) {
+    const glyph = FONT[ch];
+    if (!glyph) { cx += (3 + 1) * scale; continue; }
+    for (let row = 0; row < glyph.length; row++) {
+      for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col]) {
+          ctx.fillRect(cx + col * scale, y + row * scale, scale, scale);
+        }
+      }
+    }
+    cx += (3 + 1) * scale;
+  }
+}
+
+function textWidth(text, scale=2) {
+  return text.length * (3 + 1) * scale - scale;
+}
+
+// ─────────────────────────────────────────────
+//  SPRITE DRAWING
+// ─────────────────────────────────────────────
+function drawSprite(sprite, ox, oy) {
+  for (let row = 0; row < sprite.length; row++) {
+    for (let col = 0; col < sprite[row].length; col++) {
+      const c = sprite[row][col];
+      if (c === null) continue;
+      ctx.fillStyle = c;
+      ctx.fillRect(ox + col * SCALE, oy + row * SCALE, SCALE, SCALE);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+//  BACKGROUND DRAWERS
+// ─────────────────────────────────────────────
+function drawBgBusy() {
+  // Dark background
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Pixel monitor (red glow)
+  const mx = 10, my = 30, mw = 60, mh = 45;
+  // Glow effect via concentric rects with decreasing alpha
+  for (let g = 4; g >= 0; g--) {
+    ctx.fillStyle = `rgba(255,30,30,${0.06 * (5 - g)})`;
+    ctx.fillRect(mx - g*3, my - g*3, mw + g*6, mh + g*6);
+  }
+  ctx.fillStyle = '#1a0000';
+  ctx.fillRect(mx, my, mw, mh);
+  ctx.fillStyle = '#ff2222';
+  ctx.fillRect(mx+2, my+2, mw-4, mh-8);
+  // Monitor stand
+  ctx.fillStyle = '#444';
+  ctx.fillRect(mx + mw/2 - 4, my + mh, 8, 6);
+  ctx.fillRect(mx + mw/2 - 10, my + mh + 6, 20, 4);
+
+  // Pixel keyboard below cat
+  const kx = 60, ky = 178, kw = 110, kh = 14;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(kx, ky, kw, kh);
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = (i % 2 === 0) ? '#666' : '#555';
+    ctx.fillRect(kx + 4 + i * 10, ky + 3, 8, 7);
+  }
+
+  // Flying paper pixel (alternates position)
+  const t = Date.now();
+  const paperX = 170 + Math.floor((t / 200) % 4) * 4;
+  const paperY = 40 + Math.floor((t / 300) % 6) * 3;
+  ctx.fillStyle = '#ffffcc';
+  ctx.fillRect(paperX, paperY, 10, 12);
+  ctx.fillStyle = '#aaa';
+  ctx.fillRect(paperX+2, paperY+3, 6, 1);
+  ctx.fillRect(paperX+2, paperY+5, 6, 1);
+  ctx.fillRect(paperX+2, paperY+7, 4, 1);
+
+  // Floor checkerboard
+  drawFloor(160);
+}
+
+function drawBgWaiting() {
+  // Warm amber room
+  ctx.fillStyle = '#1a1200';
+  ctx.fillRect(0, 0, CW, CH);
+  // Subtle amber gradient via layered fills
+  ctx.fillStyle = 'rgba(255,180,0,0.05)';
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Simple window
+  ctx.fillStyle = '#1a2a3a';
+  ctx.fillRect(160, 20, 60, 50);
+  ctx.fillStyle = '#223344';
+  ctx.fillRect(162, 22, 56, 46);
+  // Window cross
+  ctx.fillStyle = '#334455';
+  ctx.fillRect(188, 22, 4, 46);
+  ctx.fillRect(162, 44, 56, 4);
+  // Moon in window
+  ctx.fillStyle = '#ffffaa';
+  ctx.fillRect(170, 28, 10, 10);
+  ctx.fillStyle = '#223344';
+  ctx.fillRect(174, 28, 8, 8); // crescent cutout
+
+  // Floor
+  drawFloor(165);
+}
+
+function drawBgIdle() {
+  // Cozy very dark background
+  ctx.fillStyle = '#060810';
+  ctx.fillRect(0, 0, CW, CH);
+  // Subtle blue tint
+  ctx.fillStyle = 'rgba(30,50,120,0.15)';
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Stars
+  const stars = [[10,10],[40,25],[80,8],[150,15],[200,30],[220,12],[30,50],[190,55]];
+  ctx.fillStyle = '#ffffff';
+  for (const [sx, sy] of stars) {
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+
+  // Cozy floor
+  drawFloor(170);
+}
+
+function drawFloor(y) {
+  for (let tx = 0; tx < CW; tx += 16) {
+    const dark = ((tx / 16) % 2 === 0);
+    ctx.fillStyle = dark ? '#1a1a1a' : '#222222';
+    ctx.fillRect(tx, y, 16, CH - y);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  ZZZ BUBBLES
+// ─────────────────────────────────────────────
+function spawnZ() {
+  zBubbles.push({
+    x: 130 + Math.random() * 20,
+    y: 80,
+    alpha: 1,
+    size: Math.floor(1 + Math.random() * 2), // 1, 2, or 3 Zs
+    vy: 0.4 + Math.random() * 0.3,
+  });
+}
+
+function updateZBubbles(dt) {
+  zTimer += dt;
+  if (zTimer > 1800) {
+    zTimer = 0;
+    spawnZ();
+  }
+  for (const b of zBubbles) {
+    b.y -= b.vy;
+    b.alpha -= 0.003;
+  }
+  zBubbles = zBubbles.filter(b => b.alpha > 0);
+}
+
+function drawZBubbles() {
+  for (const b of zBubbles) {
+    const label = 'Z'.repeat(b.size);
+    ctx.globalAlpha = Math.max(0, b.alpha);
+    drawText(label, Math.round(b.x), Math.round(b.y), '#aaddff', 2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  MAIN RENDER LOOP
+// ─────────────────────────────────────────────
+let frameDelta = 0;
+
+function render(ts) {
+  const dt = ts - lastTime;
+  lastTime = ts;
+
+  ctx.clearRect(0, 0, CW, CH);
+  ctx.imageSmoothingEnabled = false;
+
+  // ── cat position (centered horizontally, sitting on floor) ──
+  const catX = Math.floor((CW - SPR_W * SCALE) / 2);
+  const catY = 60;
+
+  if (curState === 'busy') {
+    drawBgBusy();
+
+    // Animate
+    frameDelta += dt;
+    if (frameDelta >= BUSY_MS) {
+      frameDelta = 0;
+      frameIdx = (frameIdx + 1) % BUSY_FRAMES.length;
+    }
+    drawSprite(BUSY_FRAMES[frameIdx], catX, catY);
+
+    // Label
+    const lbl = 'BUSY';
+    const lw = textWidth(lbl, 2);
+    drawText(lbl, Math.floor((CW - lw) / 2), 20, '#ff4444', 2);
+
+  } else if (curState === 'waiting') {
+    drawBgWaiting();
+
+    frameDelta += dt;
+    lickTimer += dt;
+
+    if (!licking) {
+      if (frameDelta >= WAIT_MS) {
+        frameDelta = 0;
+        frameIdx = (frameIdx + 1) % WAIT_FRAMES.length;
+      }
+      if (lickTimer >= lickDelay) {
+        licking = true;
+        lickFrame = 0;
+        frameDelta = 0;
+        lickTimer = 0;
+        lickDelay = 4000 + Math.random() * 2000;
+      }
+      drawSprite(WAIT_FRAMES[frameIdx], catX, catY);
+    } else {
+      if (frameDelta >= 200) {
+        frameDelta = 0;
+        lickFrame++;
+        if (lickFrame >= LICK_FRAMES.length) {
+          licking = false;
+          lickFrame = 0;
+          frameIdx = 0;
+        }
+      }
+      if (licking) {
+        drawSprite(LICK_FRAMES[lickFrame], catX, catY);
+      } else {
+        drawSprite(WAIT_FRAMES[frameIdx], catX, catY);
+      }
+    }
+
+    const lbl = 'WAITING';
+    const lw = textWidth(lbl, 2);
+    drawText(lbl, Math.floor((CW - lw) / 2), 20, '#ffcc44', 2);
+
+  } else { // idle
+    drawBgIdle();
+
+    frameDelta += dt;
+    if (frameDelta >= IDLE_MS) {
+      frameDelta = 0;
+      frameIdx = (frameIdx + 1) % IDLE_FRAMES.length;
+    }
+    updateZBubbles(dt);
+    drawSprite(IDLE_FRAMES[frameIdx], catX, catY);
+    drawZBubbles();
+
+    const lbl = 'IDLE';
+    const lw = textWidth(lbl, 2);
+    drawText(lbl, Math.floor((CW - lw) / 2), 20, '#4488ff', 2);
+  }
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(ts => { lastTime = ts; requestAnimationFrame(render); });
+</script>
+</body>
+</html>

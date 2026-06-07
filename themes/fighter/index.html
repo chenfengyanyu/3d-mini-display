@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fighter — Claude Status</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ── Canvas setup ──────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+function resize() {
+  canvas.width  = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let curState = 'idle';
+function handleState(s) {
+  if (!['busy', 'waiting', 'idle'].includes(s) || s === curState) return;
+  const prev = curState;
+  curState = s;
+  onStateChange(prev, s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+// ── Pixel sprite definitions (16×24, each row = 16 pixels) ───────────────────
+// Color keys: 0=transparent, 1=body, 2=highlight, 3=dark, 4=skin/detail
+// LEFT fighter (AI / Claude) — blue/cyan palette
+const AI_COLORS  = { 1: '#0088ff', 2: '#00ccff', 3: '#004488', 4: '#ffffff' };
+// RIGHT fighter (Human)      — red/orange palette
+const HU_COLORS  = { 1: '#cc2200', 2: '#ff4444', 3: '#881100', 4: '#ffccaa' };
+
+// Sprite rows: each value is a color key (0 = transparent)
+// Format: 16 values per row, 24 rows tall
+function makeSprite(rows, colors) {
+  const W = 16, H = rows.length;
+  const off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  const c = off.getContext('2d');
+  c.imageSmoothingEnabled = false;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const k = rows[y][x];
+      if (k === 0) continue;
+      c.fillStyle = colors[k];
+      c.fillRect(x, y, 1, 1);
+    }
+  }
+  return off;
+}
+
+// AI fighter sprites — idle frames (weight shift)
+const AI_IDLE_0 = makeSprite([
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0], // antenna
+  [0,0,0,0,1,2,4,4,2,1,0,0,0,0,0,0], // head top
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0], // eyes
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0], // neck
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0], // shoulders
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,1,0,1,1,1,1,1,1,1,1,0,1,0,0,0], // arms out
+  [0,1,0,1,1,1,1,1,1,1,1,0,1,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0], // waist
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0], // legs
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,3,1,0,0,1,3,0,0,0,0,0,0],
+  [0,0,0,3,3,0,0,0,0,3,3,0,0,0,0,0], // feet
+], AI_COLORS);
+
+const AI_IDLE_1 = makeSprite([
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,2,4,4,2,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0], // arms slightly lower
+  [0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,3,1,0,0,1,3,0,0,0,0,0,0],
+  [0,0,0,0,3,3,0,0,3,3,0,0,0,0,0,0],
+], AI_COLORS);
+
+// AI attack frames — punch forward (toward right)
+const AI_ATK_0 = makeSprite([
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,2,4,4,2,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,1,1,1,1,1,1,1,1,1,1,2,2,2,1,0], // punch arm extended RIGHT
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0], // stance spread
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0],
+  [0,0,0,3,1,0,0,0,0,1,3,0,0,0,0,0],
+  [0,0,3,3,0,0,0,0,0,0,3,3,0,0,0,0],
+], AI_COLORS);
+
+const AI_ATK_1 = makeSprite([
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,2,4,4,2,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,0,1,1,1,1,1,1,1,1,1,1,2,2,0,0], // punch slightly different angle
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,0],
+  [0,0,0,3,1,0,0,0,0,1,3,0,0,0,0,0],
+  [0,0,3,3,0,0,0,0,0,0,3,3,0,0,0,0],
+], AI_COLORS);
+
+// AI victory — arms raised
+const AI_VIC = makeSprite([
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,2,4,4,2,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,1,1,2,1,1,1,1,2,1,1,0,0,0,0],
+  [0,1,1,0,1,1,1,1,1,1,0,1,1,0,0,0], // arms raised up
+  [1,1,0,0,1,1,1,1,1,1,0,0,1,1,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,3,1,0,0,1,3,0,0,0,0,0,0],
+  [0,0,0,3,3,0,0,0,0,3,3,0,0,0,0,0],
+], AI_COLORS);
+
+// Human fighter — idle frames
+const HU_IDLE_0 = makeSprite([
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,1,0,1,1,1,1,1,1,1,1,0,1,0,0,0],
+  [0,1,0,1,1,1,1,1,1,1,1,0,1,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,3,1,0,0,1,3,0,0,0,0,0,0],
+  [0,0,0,3,3,0,0,0,0,3,3,0,0,0,0,0],
+], HU_COLORS);
+
+const HU_IDLE_1 = makeSprite([
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,1,2,1,1,1,1,2,1,0,0,0,0,0],
+  [0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0],
+  [0,0,0,0,3,1,0,0,1,3,0,0,0,0,0,0],
+  [0,0,0,0,3,3,0,0,3,3,0,0,0,0,0,0],
+], HU_COLORS);
+
+// Human hit (recoiling)
+const HU_HIT = makeSprite([
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,1,2,2,1,0,0,0,0,0,0], // head shifted right
+  [0,0,0,0,0,1,4,4,4,4,1,0,0,0,0,0],
+  [0,0,0,0,0,1,4,2,2,4,1,0,0,0,0,0],
+  [0,0,0,0,0,1,4,4,4,4,1,0,0,0,0,0],
+  [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,1,2,1,1,1,1,2,1,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,1,0,1,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
+  [0,0,0,0,1,1,1,1,1,1,1,0,0,0,0,0],
+  [0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0],
+  [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
+  [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0], // staggering stance
+  [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0],
+  [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0],
+  [0,0,0,0,3,1,0,0,0,0,1,3,0,0,0,0],
+  [0,0,0,3,3,0,0,0,0,0,0,3,3,0,0,0],
+], HU_COLORS);
+
+// Human defeated — slumped
+const HU_DEF = makeSprite([
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,1,2,2,1,0,0,0,0,0,0,0], // head now low
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,2,2,4,1,0,0,0,0,0,0],
+  [0,0,0,0,1,4,4,4,4,1,0,0,0,0,0,0],
+  [0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0], // body collapsed
+  [0,0,1,1,1,1,1,1,1,1,1,1,0,0,0,0],
+  [0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+  [0,3,3,3,3,3,3,3,3,3,3,3,3,0,0,0], // legs flat
+  [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+], HU_COLORS);
+
+// ── Game state ────────────────────────────────────────────────────────────────
+const SPRITE_SCALE = 5;
+const SPRITE_W = 16 * SPRITE_SCALE;
+const SPRITE_H = 18 * SPRITE_SCALE;
+
+let frame        = 0;
+let animTick     = 0;
+let aiFrame      = 0;   // which animation frame AI is on
+let huFrame      = 0;
+let comboCount   = 0;
+let comboDisplay = 0;
+let comboAlpha   = 0;
+let rightHP      = 100;
+let flashAlpha   = 0;
+let particles    = [];
+let stars        = [];
+let timer        = 99;
+let timerTick    = 0;
+let auraAngle    = 0;
+let hitShake     = 0;
+let roundNew     = false;
+
+function onStateChange(prev, next) {
+  if (next === 'idle') {
+    // Victory — reset right HP to 0 for the "new round" visual, then show victory
+    rightHP  = 0;
+    comboCount = 0;
+    roundNew = true;
+  }
+  if (next === 'busy') {
+    // Start a new round if coming from idle
+    if (prev === 'idle') rightHP = 100;
+    comboCount = 0;
+  }
+}
+
+// ── Particle system ───────────────────────────────────────────────────────────
+function spawnSparks(x, y, n) {
+  for (let i = 0; i < n; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 4;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      life: 1,
+      decay: 0.05 + Math.random() * 0.08,
+      size: 3 + Math.random() * 5,
+      color: Math.random() < 0.5 ? '#ffff00' : '#ff8800',
+    });
+  }
+}
+
+function spawnStars(x, y, n) {
+  for (let i = 0; i < n; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 0.5 + Math.random() * 2;
+    stars.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 1,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.02,
+      size: 4 + Math.random() * 6,
+      color: Math.random() < 0.5 ? '#ffffff' : '#00ffff',
+      rot: Math.random() * Math.PI * 2,
+      rotV: (Math.random() - 0.5) * 0.2,
+    });
+  }
+}
+
+function drawStar5(cx, cy, r, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+    const b = (i * 4 * Math.PI) / 5 + (2 * Math.PI) / 5 - Math.PI / 2;
+    if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    ctx.lineTo(cx + (r * 0.4) * Math.cos(b), cy + (r * 0.4) * Math.sin(b));
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── Background drawing ────────────────────────────────────────────────────────
+function drawBackground() {
+  const W = canvas.width, H = canvas.height;
+
+  // Sky gradient based on state
+  let skyTop, skyBot;
+  if (curState === 'busy') {
+    skyTop = '#1a0000';
+    skyBot = '#330800';
+  } else if (curState === 'waiting') {
+    skyTop = '#1a1400';
+    skyBot = '#2d2000';
+  } else {
+    skyTop = '#001a0a';
+    skyBot = '#002d14';
+  }
+  const grad = ctx.createLinearGradient(0, 0, 0, H * 0.65);
+  grad.addColorStop(0, skyTop);
+  grad.addColorStop(1, skyBot);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Floor
+  const floorY = H * 0.72;
+  const floorGrad = ctx.createLinearGradient(0, floorY, 0, H);
+  if (curState === 'busy') {
+    floorGrad.addColorStop(0, '#2a0a00');
+    floorGrad.addColorStop(1, '#1a0500');
+  } else if (curState === 'waiting') {
+    floorGrad.addColorStop(0, '#2a2000');
+    floorGrad.addColorStop(1, '#1a1500');
+  } else {
+    floorGrad.addColorStop(0, '#002a10');
+    floorGrad.addColorStop(1, '#001a08');
+  }
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, floorY, W, H - floorY);
+
+  // Floor line
+  ctx.strokeStyle = curState === 'busy' ? '#ff440044' : curState === 'waiting' ? '#ffaa0044' : '#00ff8844';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, floorY);
+  ctx.lineTo(W, floorY);
+  ctx.stroke();
+
+  // Crowd silhouettes
+  drawCrowd(floorY);
+
+  // Background flicker for busy
+  if (curState === 'busy' && flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255,80,0,${flashAlpha * 0.15})`;
+    ctx.fillRect(0, 0, W, H);
+    flashAlpha -= 0.04;
+    if (flashAlpha < 0) flashAlpha = 0;
+  }
+}
+
+function drawCrowd(floorY) {
+  const W = canvas.width;
+  // Simple crowd heads silhouetted in the background
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  const crowdY = floorY - 20;
+  const headCount = Math.floor(W / 18);
+  for (let i = 0; i < headCount; i++) {
+    const x = i * 18 + 9;
+    const bobY = Math.sin(frame * 0.05 + i * 0.7) * 2;
+    const h = 12 + (i % 3) * 4;
+    ctx.beginPath();
+    ctx.arc(x, crowdY + bobY, h / 2, Math.PI, 0);
+    ctx.rect(x - h / 2, crowdY + bobY, h, h * 0.6);
+    ctx.fill();
+  }
+}
+
+// ── HUD drawing ───────────────────────────────────────────────────────────────
+function drawHUD() {
+  const W = canvas.width, H = canvas.height;
+  const HUD_H = Math.max(44, H * 0.09);
+  const barW   = W * 0.33;
+  const barH   = Math.max(10, HUD_H * 0.22);
+  const barY   = HUD_H * 0.55;
+  const pad    = W * 0.03;
+
+  // HUD background
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, HUD_H);
+  ctx.strokeStyle = curState === 'busy' ? '#ff4400' : curState === 'waiting' ? '#ffaa00' : '#00ff88';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, W, HUD_H);
+
+  // ── LEFT health bar (AI) ──────────────────────────────────────────────────
+  const leftHP = 100; // AI always full
+  ctx.fillStyle = '#333';
+  ctx.fillRect(pad, barY, barW, barH);
+  const leftFill = (leftHP / 100) * barW;
+  const leftGrad = ctx.createLinearGradient(pad, 0, pad + leftFill, 0);
+  leftGrad.addColorStop(0, '#00ff88');
+  leftGrad.addColorStop(1, '#00ccff');
+  ctx.fillStyle = leftGrad;
+  ctx.fillRect(pad, barY, leftFill, barH);
+  // border
+  ctx.strokeStyle = '#ffffff44';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad, barY, barW, barH);
+
+  // LEFT name
+  const nameFontSize = Math.max(9, HUD_H * 0.22);
+  ctx.font = `bold ${nameFontSize}px monospace`;
+  ctx.fillStyle = '#00ccff';
+  ctx.textAlign = 'left';
+  ctx.fillText('AI', pad, barY - 3);
+
+  // ── RIGHT health bar (Human) ──────────────────────────────────────────────
+  const rightX = W - pad - barW;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(rightX, barY, barW, barH);
+  const rightFill = (rightHP / 100) * barW;
+  const rightGrad = ctx.createLinearGradient(rightX, 0, rightX + rightFill, 0);
+  rightGrad.addColorStop(0, '#ff4400');
+  rightGrad.addColorStop(1, '#ffcc00');
+  ctx.fillStyle = rightGrad;
+  ctx.fillRect(rightX + (barW - rightFill), barY, rightFill, barH);
+  ctx.strokeStyle = '#ffffff44';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rightX, barY, barW, barH);
+
+  // RIGHT name
+  ctx.fillStyle = '#ff4444';
+  ctx.textAlign = 'right';
+  ctx.fillText('HUMAN', W - pad, barY - 3);
+
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  const timerFontSize = Math.max(16, HUD_H * 0.5);
+  ctx.font = `bold ${timerFontSize}px monospace`;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.fillText(String(timer).padStart(2, '0'), W / 2, barY + barH);
+
+  // ── Status banner ─────────────────────────────────────────────────────────
+  const bannerFontSize = Math.max(8, HUD_H * 0.2);
+  ctx.font = `bold ${bannerFontSize}px monospace`;
+  ctx.textAlign = 'center';
+  if (curState === 'busy') {
+    ctx.fillStyle = `hsl(${(frame * 6) % 360},100%,65%)`;
+    ctx.fillText('FIGHTING!', W / 2, HUD_H * 0.2);
+  } else if (curState === 'waiting') {
+    ctx.fillStyle = '#ffdd00';
+    ctx.fillText('READY...', W / 2, HUD_H * 0.2);
+  } else {
+    const flash = Math.sin(frame * 0.15) > 0;
+    ctx.fillStyle = flash ? '#00ffcc' : '#ffffff';
+    ctx.fillText('PERFECT!', W / 2, HUD_H * 0.2);
+  }
+}
+
+// ── Combo counter ─────────────────────────────────────────────────────────────
+function drawCombo() {
+  if (comboDisplay < 2 || comboAlpha <= 0) return;
+  const W = canvas.width, H = canvas.height;
+  const HUD_H = Math.max(44, H * 0.09);
+  const cx = W * 0.72;
+  const cy = HUD_H + H * 0.22;
+  const sz = Math.max(18, W * 0.045);
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, comboAlpha);
+  ctx.font = `bold ${sz * 0.6}px monospace`;
+  ctx.fillStyle = '#ffff00';
+  ctx.textAlign = 'center';
+  ctx.fillText('COMBO', cx, cy);
+  ctx.font = `bold ${sz}px monospace`;
+  ctx.fillStyle = `hsl(${(frame * 8) % 360},100%,65%)`;
+  ctx.fillText(`x${comboDisplay}`, cx, cy + sz);
+  ctx.restore();
+}
+
+// ── Aura / energy rings ───────────────────────────────────────────────────────
+function drawAura(cx, cy, color, phase) {
+  for (let r = 0; r < 3; r++) {
+    const radius = 30 + r * 18 + Math.sin(auraAngle + phase + r) * 8;
+    const alpha  = 0.15 + Math.sin(auraAngle * 2 + phase + r) * 0.1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Fighter drawing ───────────────────────────────────────────────────────────
+function getSprite() {
+  // Returns [aiSprite, huSprite]
+  if (curState === 'busy') {
+    const f = Math.floor(animTick / 5) % 4;
+    const aiS = (f < 2) ? AI_ATK_0 : AI_ATK_1;
+    const huS = (hitShake > 0) ? HU_HIT : ((Math.floor(animTick / 15) % 2 === 0) ? HU_IDLE_0 : HU_IDLE_1);
+    return [aiS, huS];
+  } else if (curState === 'waiting') {
+    const f = Math.floor(animTick / 20) % 2;
+    const aiS = f === 0 ? AI_IDLE_0 : AI_IDLE_1;
+    const huS = f === 0 ? HU_IDLE_0 : HU_IDLE_1;
+    return [aiS, huS];
+  } else {
+    // idle = victory
+    return [AI_VIC, HU_DEF];
+  }
+}
+
+function drawFighters() {
+  const W = canvas.width, H = canvas.height;
+  const HUD_H = Math.max(44, H * 0.09);
+  const floorY = H * 0.72;
+  const scale  = Math.max(2, Math.floor(Math.min(W, H) / 80));
+  const sw = 16 * scale;
+  const sh = 18 * scale;
+
+  const aiX  = W * 0.22 - sw / 2;
+  const huX  = W * 0.72 - sw / 2;
+  const sprY = floorY - sh;
+
+  const [aiSprite, huSprite] = getSprite();
+
+  // Shake effect on hit
+  let shakeX = 0;
+  if (hitShake > 0) {
+    shakeX = (Math.random() - 0.5) * hitShake * 4;
+    hitShake = Math.max(0, hitShake - 0.5);
+  }
+
+  // Aura in waiting state
+  if (curState === 'waiting') {
+    drawAura(aiX + sw / 2, sprY + sh / 2, '#00ccff', 0);
+    drawAura(huX + sw / 2 + shakeX, sprY + sh / 2, '#ff4444', Math.PI);
+  }
+
+  // Victory sparkles
+  if (curState === 'idle') {
+    if (frame % 8 === 0) spawnStars(aiX + sw / 2, sprY + sh * 0.3, 2);
+  }
+
+  // AI fighter (no flip needed, faces right naturally)
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(aiSprite, aiX, sprY, sw, sh);
+  ctx.restore();
+
+  // Human fighter — flip horizontally so it faces left
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(huX + sw + shakeX, sprY);
+  ctx.scale(-1, 1);
+  ctx.drawImage(huSprite, 0, 0, sw, sh);
+  ctx.restore();
+
+  // Shadow
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.ellipse(aiX + sw / 2, floorY + 2, sw * 0.4, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(huX + sw / 2 + shakeX, floorY + 2, sw * 0.4, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── Particles ─────────────────────────────────────────────────────────────────
+function updateAndDrawParticles() {
+  particles = particles.filter(p => p.life > 0);
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.18; // gravity
+    p.life -= p.decay;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+function updateAndDrawStars() {
+  stars = stars.filter(s => s.life > 0);
+  for (const s of stars) {
+    s.x += s.vx;
+    s.y += s.vy;
+    s.vy += 0.05;
+    s.life -= s.decay;
+    s.rot += s.rotV;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.rot);
+    drawStar5(0, 0, s.size, s.color, Math.max(0, s.life));
+    ctx.restore();
+  }
+}
+
+// ── "PERFECT!" big text ───────────────────────────────────────────────────────
+function drawVictoryText() {
+  if (curState !== 'idle') return;
+  const W = canvas.width, H = canvas.height;
+  const t = Math.sin(frame * 0.12);
+  const sz = Math.max(24, W * 0.07) + t * 4;
+  ctx.save();
+  ctx.font = `bold ${sz}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillText('PERFECT!', W / 2 + 3, H * 0.45 + 3);
+  // Gradient text
+  const grad = ctx.createLinearGradient(W * 0.2, 0, W * 0.8, 0);
+  grad.addColorStop(0, '#00ffcc');
+  grad.addColorStop(0.5, '#ffffff');
+  grad.addColorStop(1, '#00ccff');
+  ctx.fillStyle = grad;
+  ctx.globalAlpha = 0.85 + Math.sin(frame * 0.15) * 0.15;
+  ctx.fillText('PERFECT!', W / 2, H * 0.45);
+  ctx.restore();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+let lastTime = 0;
+function loop(ts) {
+  const dt = ts - lastTime;
+  lastTime = ts;
+
+  frame++;
+  animTick++;
+  auraAngle += 0.04;
+
+  // Timer countdown (only during busy)
+  if (curState === 'busy') {
+    timerTick++;
+    if (timerTick >= 60) { timerTick = 0; timer = Math.max(0, timer - 1); }
+  }
+
+  // HP drain during busy
+  if (curState === 'busy') {
+    if (frame % 18 === 0 && rightHP > 5) {
+      rightHP = Math.max(5, rightHP - (1 + Math.random() * 2));
+    }
+    // Spawn sparks at impact point every combo step
+    if (frame % 10 === 0) {
+      const W = canvas.width, H = canvas.height;
+      const floorY = H * 0.72;
+      const scale  = Math.max(2, Math.floor(Math.min(W, H) / 80));
+      const sw = 16 * scale;
+      const impactX = W * 0.22 + sw * 0.9;
+      const impactY = floorY - sw * 0.7;
+      spawnSparks(impactX, impactY, 5);
+      flashAlpha = 0.6;
+      hitShake   = 4;
+      comboCount++;
+      comboDisplay = comboCount;
+      comboAlpha   = 1.5;
+    }
+  }
+
+  // Combo fade
+  if (comboAlpha > 0) comboAlpha -= 0.008;
+
+  // Victory sparkle burst
+  if (curState === 'idle' && frame % 20 === 0) {
+    const W = canvas.width, H = canvas.height;
+    spawnStars(W * 0.22, H * 0.55, 3);
+  }
+
+  // Reset timer on new round
+  if (roundNew) {
+    timer = 99;
+    timerTick = 0;
+    roundNew = false;
+  }
+
+  // Draw
+  drawBackground();
+  drawFighters();
+  updateAndDrawParticles();
+  updateAndDrawStars();
+  drawHUD();
+  drawCombo();
+  drawVictoryText();
+
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

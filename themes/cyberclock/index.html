@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyberClock — Claude Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ── State system ─────────────────────────────────────────────────────────────
+let curState = 'idle';
+function handleState(s) {
+  if (!['busy', 'waiting', 'idle'].includes(s) || s === curState) return;
+  curState = s;
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+// ── Canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+  initHexColumns();
+}
+window.addEventListener('resize', resize);
+
+// ── Color lerp ───────────────────────────────────────────────────────────────
+const STATE_COLORS = {
+  busy:    { r: 255, g: 48,  b: 48  },
+  waiting: { r: 251, g: 191, b: 36  },
+  idle:    { r: 52,  g: 211, b: 153 },
+};
+let curColor = { ...STATE_COLORS.idle };
+
+function lerpColor(a, b, t) {
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  };
+}
+
+function colorStr(c, alpha = 1) {
+  return `rgba(${c.r|0},${c.g|0},${c.b|0},${alpha})`;
+}
+
+// ── Hex grid background ───────────────────────────────────────────────────────
+function drawHexGrid() {
+  const size = 28;
+  const w = size * 2;
+  const h = Math.sqrt(3) * size;
+  ctx.strokeStyle = colorStr(curColor, 0.04);
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  for (let row = -1; row < Math.ceil(H / h) + 1; row++) {
+    for (let col = -1; col < Math.ceil(W / w) + 2; col++) {
+      const xOffset = (row % 2) * size;
+      const cx = col * w + xOffset;
+      const cy = row * h;
+      hexPath(cx, cy, size);
+    }
+  }
+  ctx.stroke();
+}
+
+function hexPath(cx, cy, r) {
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 6;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+// ── HEX columns (matrix-style) ────────────────────────────────────────────────
+const HEX_CHARS = '0123456789ABCDEF';
+const COL_FS = 13;
+let hexColumns = [];
+
+function initHexColumns() {
+  const numCols = Math.floor(W / COL_FS);
+  hexColumns = Array.from({ length: numCols }, (_, i) => ({
+    x: i * COL_FS + COL_FS * 0.5,
+    y: Math.random() * H,
+    speed: 0.4 + Math.random() * 0.8,
+    length: 6 + Math.floor(Math.random() * 14),
+    chars: Array.from({ length: 20 }, () => HEX_CHARS[Math.floor(Math.random() * 16)]),
+    charTimer: 0,
+  }));
+}
+
+function updateHexColumns(dt) {
+  for (const col of hexColumns) {
+    col.y += col.speed * dt * 60 * 0.25;
+    if (col.y > H + col.length * COL_FS) {
+      col.y = -col.length * COL_FS;
+      col.speed = 0.4 + Math.random() * 0.8;
+    }
+    col.charTimer += dt;
+    if (col.charTimer > 0.08) {
+      col.charTimer = 0;
+      const idx = Math.floor(Math.random() * col.chars.length);
+      col.chars[idx] = HEX_CHARS[Math.floor(Math.random() * 16)];
+    }
+  }
+}
+
+function drawHexColumns() {
+  ctx.font = `${COL_FS}px "JetBrains Mono", monospace`;
+  ctx.textAlign = 'center';
+  for (const col of hexColumns) {
+    for (let i = 0; i < col.length; i++) {
+      const alpha = (i / col.length) * 0.18;
+      ctx.fillStyle = colorStr(curColor, alpha);
+      const ch = col.chars[i % col.chars.length];
+      ctx.fillText(ch, col.x, col.y - i * COL_FS);
+    }
+  }
+}
+
+// ── Seven-segment display ─────────────────────────────────────────────────────
+// Segment layout: a=top, b=top-right, c=bottom-right, d=bottom, e=bottom-left, f=top-left, g=middle
+const DIGIT_SEGMENTS = {
+  '0': ['a','b','c','d','e','f'],
+  '1': ['b','c'],
+  '2': ['a','b','d','e','g'],
+  '3': ['a','b','c','d','g'],
+  '4': ['b','c','f','g'],
+  '5': ['a','c','d','f','g'],
+  '6': ['a','c','d','e','f','g'],
+  '7': ['a','b','c'],
+  '8': ['a','b','c','d','e','f','g'],
+  '9': ['a','b','c','d','f','g'],
+};
+
+// Draw a single seven-segment digit at (x, y) with given width and height
+function drawDigit(char, x, y, dw, dh, color) {
+  const t = dw * 0.12;  // thickness
+  const gap = t * 0.25;
+  const r = t * 0.3;    // corner radius
+
+  const activeSegs = DIGIT_SEGMENTS[char] || [];
+
+  // Segment definitions: [id, x1, y1, x2, y2, orientation]
+  // orientation: 'h' = horizontal, 'v' = vertical
+  const hw = dw - t;      // horizontal segment width
+  const vh = dh * 0.5 - t; // vertical segment height
+
+  const segments = {
+    a: { x: x + t * 0.5 + gap, y: y,                  w: hw - gap * 2, h: t, o: 'h' },
+    b: { x: x + dw - t,        y: y + t * 0.5 + gap,  w: t, h: vh - gap * 2, o: 'v' },
+    c: { x: x + dw - t,        y: y + dh * 0.5 + t * 0.5 + gap, w: t, h: vh - gap * 2, o: 'v' },
+    d: { x: x + t * 0.5 + gap, y: y + dh - t,         w: hw - gap * 2, h: t, o: 'h' },
+    e: { x: x,                  y: y + dh * 0.5 + t * 0.5 + gap, w: t, h: vh - gap * 2, o: 'v' },
+    f: { x: x,                  y: y + t * 0.5 + gap,  w: t, h: vh - gap * 2, o: 'v' },
+    g: { x: x + t * 0.5 + gap, y: y + dh * 0.5 - t * 0.5, w: hw - gap * 2, h: t, o: 'h' },
+  };
+
+  for (const [id, seg] of Object.entries(segments)) {
+    const on = activeSegs.includes(id);
+    if (on) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = colorStr(color, 0.9);
+      ctx.fillStyle = colorStr(color, 1);
+    } else {
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = colorStr(color, 0.08);
+    }
+    roundRect(seg.x, seg.y, seg.w, seg.h, r);
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+}
+
+function roundRect(x, y, w, h, r) {
+  if (w <= 0 || h <= 0) return;
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Draw colon separator
+function drawColon(x, y, dh, color) {
+  const dotR = Math.max(3, dh * 0.07);
+  const cx = x;
+  const y1 = y + dh * 0.3;
+  const y2 = y + dh * 0.7;
+
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = colorStr(color, 0.9);
+  ctx.fillStyle = colorStr(color, 1);
+
+  ctx.beginPath();
+  ctx.arc(cx, y1, dotR, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(cx, y2, dotR, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+}
+
+// Draw the full HH:MM:SS clock
+function drawClock(timeStr, color) {
+  // timeStr = "HH:MM:SS"
+  const digits = timeStr.split('');
+
+  // Responsive sizing
+  const maxClockW = Math.min(W * 0.88, 720);
+  const digitW = maxClockW / 10.4; // 8 digits + 2 colons (each ~0.7 digit wide)
+  const digitH = digitW * 1.8;
+  const colonW = digitW * 0.55;
+  const totalW = digitW * 8 + colonW * 2;
+  const startX = (W - totalW) / 2;
+  const startY = (H - digitH) / 2 - H * 0.03;
+
+  let cx = startX;
+  for (const ch of digits) {
+    if (ch === ':') {
+      drawColon(cx + colonW * 0.5, startY, digitH, color);
+      cx += colonW;
+    } else {
+      drawDigit(ch, cx, startY, digitW * 0.92, digitH, color);
+      cx += digitW;
+    }
+  }
+}
+
+// ── Scanlines overlay ─────────────────────────────────────────────────────────
+function drawScanlines() {
+  const lineH = 3;
+  const alpha = 0.06;
+  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+  for (let y = 0; y < H; y += lineH * 2) {
+    ctx.fillRect(0, y, W, lineH);
+  }
+}
+
+// ── Glitch effect ─────────────────────────────────────────────────────────────
+let glitchTimer = 3 + Math.random() * 5;
+let glitchBands = [];
+let glitchActive = false;
+let glitchDuration = 0;
+
+function scheduleGlitch() {
+  glitchTimer = 3 + Math.random() * 5;
+}
+
+function triggerGlitch() {
+  const numBands = 5 + Math.floor(Math.random() * 6);
+  glitchBands = Array.from({ length: numBands }, () => ({
+    y: Math.floor(Math.random() * H),
+    h: 2 + Math.floor(Math.random() * 4),
+    shift: (Math.random() < 0.5 ? 1 : -1) * (4 + Math.random() * 20),
+  }));
+  glitchActive = true;
+  glitchDuration = 0.1 + Math.random() * 0.1;
+}
+
+function applyGlitch() {
+  if (!glitchActive) return;
+  for (const band of glitchBands) {
+    if (band.y < 0 || band.y + band.h > H || band.h <= 0) continue;
+    const imageData = ctx.getImageData(0, band.y, W, band.h);
+    ctx.putImageData(imageData, band.shift, band.y);
+  }
+}
+
+// ── Corner decorations ────────────────────────────────────────────────────────
+function drawCorners(color) {
+  const len = Math.min(W, H) * 0.06;
+  const thickness = 2;
+  const pad = 14;
+  ctx.strokeStyle = colorStr(color, 0.7);
+  ctx.lineWidth = thickness;
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = colorStr(color, 0.5);
+  ctx.lineCap = 'square';
+
+  const corners = [
+    [pad, pad, 1, 1],
+    [W - pad, pad, -1, 1],
+    [pad, H - pad, 1, -1],
+    [W - pad, H - pad, -1, -1],
+  ];
+
+  for (const [x, y, dx, dy] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(x + dx * len, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + dy * len);
+    ctx.stroke();
+  }
+
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+}
+
+// ── Labels ────────────────────────────────────────────────────────────────────
+const STATE_LABELS = { busy: 'PROCESSING', waiting: 'STANDBY', idle: 'IDLE' };
+
+function drawLabels(color) {
+  const pad = 22;
+  const font = '"JetBrains Mono", monospace';
+
+  // Top label: CLAUDE STATUS + state
+  ctx.font = `700 11px ${font}`;
+  ctx.fillStyle = colorStr(color, 0.55);
+  ctx.textAlign = 'center';
+  ctx.letterSpacing = '3px';
+  ctx.fillText('CLAUDE STATUS', W / 2, pad + 6);
+
+  ctx.font = `700 13px ${font}`;
+  ctx.fillStyle = colorStr(color, 0.9);
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = colorStr(color, 0.5);
+  ctx.fillText('[ ' + STATE_LABELS[curState] + ' ]', W / 2, pad + 24);
+  ctx.shadowBlur = 0;
+
+  // Bottom label: date + weekday
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm   = String(now.getMonth() + 1).padStart(2, '0');
+  const dd   = String(now.getDate()).padStart(2, '0');
+  const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const dayStr = days[now.getDay()];
+  const dateStr = `${yyyy}.${mm}.${dd}  ${dayStr}`;
+
+  ctx.font = `400 12px ${font}`;
+  ctx.fillStyle = colorStr(color, 0.65);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'center';
+  ctx.fillText(dateStr, W / 2, H - pad);
+
+  ctx.letterSpacing = '0px';
+}
+
+// ── Horizontal scan line (moving) ─────────────────────────────────────────────
+let scanLineY = 0;
+function drawMovingScanLine(color) {
+  scanLineY = (scanLineY + 0.4) % H;
+  const grad = ctx.createLinearGradient(0, scanLineY - 40, 0, scanLineY + 40);
+  grad.addColorStop(0, colorStr(color, 0));
+  grad.addColorStop(0.5, colorStr(color, 0.04));
+  grad.addColorStop(1, colorStr(color, 0));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, scanLineY - 40, W, 80);
+}
+
+// ── Main animation loop ───────────────────────────────────────────────────────
+let lastTime = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+
+  // Lerp color toward target state color
+  const tgt = STATE_COLORS[curState];
+  curColor = lerpColor(curColor, tgt, dt * 2);
+
+  // Glitch timer
+  glitchTimer -= dt;
+  if (glitchTimer <= 0 && !glitchActive) {
+    triggerGlitch();
+    scheduleGlitch();
+  }
+  if (glitchActive) {
+    glitchDuration -= dt;
+    if (glitchDuration <= 0) {
+      glitchActive = false;
+      glitchBands = [];
+    }
+  }
+
+  // Update hex columns
+  updateHexColumns(dt);
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  // Background
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Hex grid
+  drawHexGrid();
+
+  // Hex columns
+  drawHexColumns();
+
+  // Moving scan line
+  drawMovingScanLine(curColor);
+
+  // Get current time string
+  const now2 = new Date();
+  const hh = String(now2.getHours()).padStart(2, '0');
+  const min = String(now2.getMinutes()).padStart(2, '0');
+  const ss  = String(now2.getSeconds()).padStart(2, '0');
+  const timeStr = `${hh}:${min}:${ss}`;
+
+  // Clock
+  drawClock(timeStr, curColor);
+
+  // Scanlines
+  drawScanlines();
+
+  // Glitch (applied after main drawing)
+  applyGlitch();
+
+  // Labels
+  drawLabels(curColor);
+
+  // Corners
+  drawCorners(curColor);
+
+  requestAnimationFrame(frame);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

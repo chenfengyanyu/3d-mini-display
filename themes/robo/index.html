@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robo Status</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0d0d1a;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─── State machine ────────────────────────────────────────────────────────────
+let curState = 'idle';
+function handleState(s) {
+  if (!['busy','waiting','idle'].includes(s) || s === curState) return;
+  curState = s;
+  onStateChange(s);
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+// ─── Canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, CX, CY;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  CX = W / 2;
+  CY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Spring physics ───────────────────────────────────────────────────────────
+function springStep(pos, vel, target, k, damp, dt) {
+  const f = -k * (pos - target) - damp * vel;
+  vel += f * dt;
+  pos += vel * dt;
+  return [pos, vel];
+}
+
+// Spring state objects
+const tiltSpring    = { pos: 0, vel: 0, target: 0,  k: 120, damp: 12 };
+const browSpring    = { pos: 0, vel: 0, target: 0,  k: 200, damp: 14 };
+const bobSpring     = { pos: 0, vel: 0, target: 0,  k: 40,  damp: 6  };
+
+// ─── Animation state ──────────────────────────────────────────────────────────
+let t = 0; // time in seconds
+
+// Blink / wink
+let blinkTimer = 3.5;
+let blinkDuration = 0;
+let isBlinking = false;
+let isWinking = false;
+let winkSide = 0; // 0=left,1=right
+
+// Waiting dots
+let dotPhase = 0; // 0..2 active dot index, cycles
+let dotTimer = 0;
+
+// Gear rotation
+let gearAngle = 0;
+
+// Antenna pulse
+let antennaPulse = 0;
+
+// Head bob
+let bobOffset = 0;
+let bobVel = 0;
+
+// Steam particles
+let particles = [];
+
+// State-driven targets
+function onStateChange(s) {
+  if (s === 'idle') {
+    tiltSpring.target = 0;
+    browSpring.target = 0;
+  } else if (s === 'waiting') {
+    tiltSpring.target = 0.22;  // ~12.5 deg
+    browSpring.target = -5;
+    dotPhase = 0;
+    dotTimer = 0;
+  } else if (s === 'busy') {
+    tiltSpring.target = 0;
+    browSpring.target = 9;     // slam down
+  }
+}
+
+// ─── Particle system ──────────────────────────────────────────────────────────
+let particleTimer = 0;
+
+function spawnParticle(x, y) {
+  particles.push({
+    x, y,
+    vx: (Math.random() - 0.5) * 18,
+    vy: -(20 + Math.random() * 30),
+    life: 1.0,
+    size: 2.5 + Math.random() * 3.5,
+  });
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x  += p.vx * dt;
+    p.y  += p.vy * dt;
+    p.vy -= 8 * dt; // slow down rise
+    p.vx *= 0.97;
+    p.life -= dt * 0.9;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  if (curState === 'busy') {
+    particleTimer -= dt;
+    if (particleTimer <= 0) {
+      particleTimer = 1 / 3;
+      // ear vent positions (world coords, will be adjusted in draw)
+      particles.push({ x: 0, y: 0, vx: (Math.random()-0.5)*16, vy:-(22+Math.random()*28), life:1, size:2+Math.random()*3, fromLeft:true });
+      particles.push({ x: 0, y: 0, vx: (Math.random()-0.5)*16, vy:-(22+Math.random()*28), life:1, size:2+Math.random()*3, fromLeft:false });
+    }
+  } else {
+    particles = [];
+    particleTimer = 0;
+  }
+}
+
+// ─── Colors ───────────────────────────────────────────────────────────────────
+const C = {
+  headBody:   '#2a2a3e',
+  headDark:   '#1a1a2e',
+  highlight:  '#4a4a5e',
+  screenBg:   '#0a0a1a',
+  rivet:      '#5a5a6e',
+  busy:       '#ff4444',
+  waiting:    '#fbbf24',
+  idle:       '#22d3ee',
+  jawGap:     '#0d0d1a',
+};
+
+function stateColor() {
+  if (curState === 'busy')    return C.busy;
+  if (curState === 'waiting') return C.waiting;
+  return C.idle;
+}
+
+// ─── Drawing helpers ──────────────────────────────────────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function drawGlow(ctx, x, y, r, color, alpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color.replace(')', `,${alpha})`).replace('rgb', 'rgba').replace('#', 'rgba(').replace('rgba(', 'rgba('));
+  // simpler: just use shadow
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = r * 2;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawGear(ctx, x, y, outerR, innerR, teeth, angle, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  const step = (Math.PI * 2) / teeth;
+  for (let i = 0; i < teeth; i++) {
+    const a0 = i * step - step * 0.3;
+    const a1 = i * step - step * 0.1;
+    const a2 = i * step + step * 0.1;
+    const a3 = i * step + step * 0.3;
+    ctx.lineTo(Math.cos(a0) * innerR, Math.sin(a0) * innerR);
+    ctx.lineTo(Math.cos(a1) * outerR, Math.sin(a1) * outerR);
+    ctx.lineTo(Math.cos(a2) * outerR, Math.sin(a2) * outerR);
+    ctx.lineTo(Math.cos(a3) * innerR, Math.sin(a3) * innerR);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+  ctx.fill();
+  // inner circle
+  ctx.beginPath();
+  ctx.arc(0, 0, innerR * 0.45, 0, Math.PI * 2);
+  ctx.fillStyle = C.screenBg;
+  ctx.fill();
+  ctx.restore();
+}
+
+// ─── Main draw ────────────────────────────────────────────────────────────────
+function draw(dt) {
+  ctx.clearRect(0, 0, W, H);
+
+  // background
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Robot dimensions (scale with canvas)
+  const scale = Math.min(W, H) / 420;
+  const HW = 110 * scale;  // head half-width
+  const HH = 90  * scale;  // head half-height
+  const rx = CX;
+  const ry = CY + bobOffset * scale;
+
+  // ── Draw particles (world space, attached to ear positions) ──────────────
+  const earLX = rx - HW - 14 * scale;
+  const earRX = rx + HW + 14 * scale;
+  const earY  = ry - 10 * scale;
+
+  for (const p of particles) {
+    if (p.fromLeft !== undefined) {
+      p.x = (p.fromLeft ? earLX : earRX);
+      p.y = earY;
+    }
+    const alpha = Math.max(0, p.life);
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.7;
+    ctx.fillStyle = C.busy;
+    ctx.shadowColor = C.busy;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Apply head tilt ───────────────────────────────────────────────────────
+  ctx.save();
+  ctx.translate(rx, ry);
+  ctx.rotate(tiltSpring.pos);
+  ctx.translate(-rx, -ry);
+
+  // ── Ear modules ───────────────────────────────────────────────────────────
+  const earW = 22 * scale, earH = 44 * scale, earR = 6 * scale;
+  const earYOff = -8 * scale;
+
+  for (let side = -1; side <= 1; side += 2) {
+    const ex = rx + side * (HW + earW * 0.5);
+    const ey = ry + earYOff;
+
+    // ear body
+    ctx.save();
+    roundRect(ctx, ex - earW/2, ey - earH/2, earW, earH, earR);
+    const earGrad = ctx.createLinearGradient(ex - earW/2, ey, ex + earW/2, ey);
+    earGrad.addColorStop(0, side < 0 ? '#3a3a50' : C.headBody);
+    earGrad.addColorStop(1, side < 0 ? C.headBody : '#3a3a50');
+    ctx.fillStyle = earGrad;
+    ctx.fill();
+    ctx.strokeStyle = C.highlight;
+    ctx.lineWidth = 1.5 * scale;
+    ctx.stroke();
+
+    // speaker grills (3 horizontal lines)
+    ctx.strokeStyle = '#2a2a3e';
+    ctx.lineWidth = 1.2 * scale;
+    for (let g = -1; g <= 1; g++) {
+      const gy = ey + g * 7 * scale;
+      ctx.beginPath();
+      ctx.moveTo(ex - earW * 0.3, gy);
+      ctx.lineTo(ex + earW * 0.3, gy);
+      ctx.stroke();
+    }
+    // vent dot (glowing when busy)
+    if (curState === 'busy') {
+      ctx.beginPath();
+      ctx.arc(ex, ey + earH * 0.28, 3 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = C.busy;
+      ctx.shadowColor = C.busy;
+      ctx.shadowBlur = 8 * scale;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  // ── Head body ─────────────────────────────────────────────────────────────
+  const headR = 18 * scale;
+  roundRect(ctx, rx - HW, ry - HH, HW * 2, HH * 2, headR);
+  const headGrad = ctx.createLinearGradient(rx - HW, ry - HH, rx + HW, ry + HH);
+  headGrad.addColorStop(0, '#32324a');
+  headGrad.addColorStop(0.4, C.headBody);
+  headGrad.addColorStop(1, C.headDark);
+  ctx.fillStyle = headGrad;
+  ctx.fill();
+  ctx.strokeStyle = C.highlight;
+  ctx.lineWidth = 2 * scale;
+  ctx.stroke();
+
+  // ── Jaw plate ─────────────────────────────────────────────────────────────
+  const jawH = 22 * scale, jawGap = 3 * scale;
+  const jawY = ry + HH + jawGap;
+  roundRect(ctx, rx - HW * 0.8, jawY, HW * 1.6, jawH, 6 * scale);
+  ctx.fillStyle = C.headBody;
+  ctx.fill();
+  ctx.strokeStyle = C.highlight;
+  ctx.lineWidth = 1.5 * scale;
+  ctx.stroke();
+  // jaw detail lines
+  ctx.strokeStyle = '#222236';
+  ctx.lineWidth = 1 * scale;
+  for (let j = 0; j < 3; j++) {
+    const jx = rx - HW * 0.5 + j * HW * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(jx, jawY + 5 * scale);
+    ctx.lineTo(jx, jawY + jawH - 5 * scale);
+    ctx.stroke();
+  }
+
+  // ── Antenna ───────────────────────────────────────────────────────────────
+  const antRodH = 32 * scale;
+  const antX = rx - 8 * scale;
+  const antBaseY = ry - HH;
+  // rod
+  ctx.beginPath();
+  ctx.moveTo(antX, antBaseY);
+  ctx.lineTo(antX, antBaseY - antRodH);
+  ctx.strokeStyle = C.highlight;
+  ctx.lineWidth = 3 * scale;
+  ctx.stroke();
+  // tip sphere
+  const tipR = 6 * scale;
+  const tipY = antBaseY - antRodH - tipR;
+  const sc = stateColor();
+  const pulseAlpha = 0.5 + 0.5 * Math.sin(antennaPulse);
+  ctx.beginPath();
+  ctx.arc(antX, tipY, tipR, 0, Math.PI * 2);
+  ctx.fillStyle = sc;
+  ctx.shadowColor = sc;
+  ctx.shadowBlur = 12 * scale * pulseAlpha;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // outer glow ring
+  ctx.beginPath();
+  ctx.arc(antX, tipY, tipR * 1.6, 0, Math.PI * 2);
+  ctx.strokeStyle = sc;
+  ctx.globalAlpha = pulseAlpha * 0.4;
+  ctx.lineWidth = 1.5 * scale;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // ── Rivets ────────────────────────────────────────────────────────────────
+  const rivetPositions = [
+    [rx - HW + 10*scale, ry - HH + 10*scale],
+    [rx + HW - 10*scale, ry - HH + 10*scale],
+    [rx - HW + 10*scale, ry + HH - 10*scale],
+    [rx + HW - 10*scale, ry + HH - 10*scale],
+  ];
+  for (const [rvx, rvy] of rivetPositions) {
+    ctx.beginPath();
+    ctx.arc(rvx, rvy, 3.5 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = C.rivet;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(rvx - 0.8*scale, rvy - 0.8*scale, 1.2*scale, 0, Math.PI*2);
+    ctx.fillStyle = '#8a8aa0';
+    ctx.fill();
+  }
+
+  // ── Eyebrow / visor plate ─────────────────────────────────────────────────
+  const visorY = ry - HH * 0.55 + browSpring.pos * scale;
+  const visorH = 10 * scale;
+  roundRect(ctx, rx - HW * 0.75, visorY - visorH/2, HW * 1.5, visorH, 4 * scale);
+  const visorGrad = ctx.createLinearGradient(rx, visorY - visorH/2, rx, visorY + visorH/2);
+  visorGrad.addColorStop(0, '#3e3e58');
+  visorGrad.addColorStop(1, '#252538');
+  ctx.fillStyle = visorGrad;
+  ctx.fill();
+  ctx.strokeStyle = '#5a5a7a';
+  ctx.lineWidth = 1 * scale;
+  ctx.stroke();
+
+  // ── Eye sockets ───────────────────────────────────────────────────────────
+  const eyeSocketW = 38 * scale, eyeSocketH = 32 * scale;
+  const eyeSocketR = 8 * scale;
+  const eyeY = ry - 8 * scale;
+  const eyeLX = rx - HW * 0.42;
+  const eyeRX = rx + HW * 0.42;
+
+  for (const ex of [eyeLX, eyeRX]) {
+    roundRect(ctx, ex - eyeSocketW/2, eyeY - eyeSocketH/2, eyeSocketW, eyeSocketH, eyeSocketR);
+    ctx.fillStyle = C.screenBg;
+    ctx.fill();
+    ctx.strokeStyle = '#3a3a50';
+    ctx.lineWidth = 1.5 * scale;
+    ctx.stroke();
+  }
+
+  // ── Eyes per state ────────────────────────────────────────────────────────
+  if (curState === 'idle') {
+    drawIdleEyes(eyeLX, eyeRX, eyeY, eyeSocketW, eyeSocketH, scale);
+  } else if (curState === 'waiting') {
+    drawWaitingEyes(eyeLX, eyeRX, eyeY, eyeSocketW, eyeSocketH, scale);
+  } else {
+    drawBusyEyes(eyeLX, eyeRX, eyeY, scale);
+  }
+
+  // ── Mouth / status strip ──────────────────────────────────────────────────
+  const mouthY = ry + HH * 0.42;
+  const mouthW = HW * 1.1, mouthH = 8 * scale;
+  roundRect(ctx, rx - mouthW/2, mouthY - mouthH/2, mouthW, mouthH, 4 * scale);
+  ctx.fillStyle = C.screenBg;
+  ctx.fill();
+  // fill with state color bar
+  const barFill = curState === 'busy' ? 1 : curState === 'waiting' ? (0.4 + 0.3 * Math.sin(t * 3)) : (0.3 + 0.15 * Math.sin(t));
+  roundRect(ctx, rx - mouthW/2 + 2*scale, mouthY - mouthH/2 + 2*scale, (mouthW - 4*scale) * barFill, mouthH - 4*scale, 2*scale);
+  ctx.fillStyle = sc;
+  ctx.shadowColor = sc;
+  ctx.shadowBlur = 6 * scale;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.restore(); // end tilt transform
+}
+
+// ─── Eye drawing functions ────────────────────────────────────────────────────
+
+function drawIdleEyes(lx, rx2, ey, sw, sh, scale) {
+  const sc = C.idle;
+  const eyeR = sh * 0.32;
+
+  for (let i = 0; i < 2; i++) {
+    const ex = i === 0 ? lx : rx2;
+    const doWink = isWinking && winkSide === i;
+    const doBlink = isBlinking;
+
+    ctx.save();
+    // clip to socket
+    roundRect(ctx, ex - sw/2, ey - sh/2, sw, sh, 8*scale);
+    ctx.clip();
+
+    if (doBlink || doWink) {
+      // closed eye — horizontal line
+      ctx.beginPath();
+      ctx.moveTo(ex - eyeR, ey);
+      ctx.lineTo(ex + eyeR, ey);
+      ctx.strokeStyle = sc;
+      ctx.lineWidth = 3 * scale;
+      ctx.shadowColor = sc;
+      ctx.shadowBlur = 8 * scale;
+      ctx.stroke();
+    } else {
+      // normal LED circle
+      ctx.beginPath();
+      ctx.arc(ex, ey, eyeR, 0, Math.PI * 2);
+      ctx.fillStyle = sc;
+      ctx.shadowColor = sc;
+      ctx.shadowBlur = 14 * scale;
+      ctx.fill();
+      // inner pupil
+      ctx.beginPath();
+      ctx.arc(ex, ey, eyeR * 0.4, 0, Math.PI * 2);
+      ctx.fillStyle = C.screenBg;
+      ctx.shadowBlur = 0;
+      ctx.fill();
+      // specular
+      ctx.beginPath();
+      ctx.arc(ex + eyeR*0.3, ey - eyeR*0.3, eyeR*0.15, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawWaitingEyes(lx, rx2, ey, sw, sh, scale) {
+  const sc = C.waiting;
+  const dotR = sh * 0.1;
+  const spacing = sw * 0.22;
+
+  for (const ex of [lx, rx2]) {
+    ctx.save();
+    roundRect(ctx, ex - sw/2, ey - sh/2, sw, sh, 8*scale);
+    ctx.clip();
+
+    for (let d = 0; d < 3; d++) {
+      const dx = ex - spacing + d * spacing;
+      const active = d <= dotPhase;
+      ctx.beginPath();
+      ctx.arc(dx, ey, dotR * (active ? 1.3 : 0.7), 0, Math.PI * 2);
+      ctx.fillStyle = sc;
+      ctx.globalAlpha = active ? 1 : 0.2;
+      ctx.shadowColor = sc;
+      ctx.shadowBlur = active ? 10 * scale : 0;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+}
+
+function drawBusyEyes(lx, rx2, ey, scale) {
+  const sc = C.busy;
+  const gR = 12 * scale;
+
+  for (const ex of [lx, rx2]) {
+    drawGear(ctx, ex, ey, gR, gR * 0.65, 8, gearAngle, sc);
+  }
+}
+
+// ─── Update loop ──────────────────────────────────────────────────────────────
+let lastTime = null;
+
+function update(now) {
+  if (!lastTime) lastTime = now;
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+  t += dt;
+
+  // ── Spring updates ────────────────────────────────────────────────────────
+  [tiltSpring.pos, tiltSpring.vel] = springStep(
+    tiltSpring.pos, tiltSpring.vel, tiltSpring.target,
+    tiltSpring.k, tiltSpring.damp, dt
+  );
+  [browSpring.pos, browSpring.vel] = springStep(
+    browSpring.pos, browSpring.vel, browSpring.target,
+    browSpring.k, browSpring.damp, dt
+  );
+
+  // ── Bob (idle only) ───────────────────────────────────────────────────────
+  const bobTarget = curState === 'idle' ? Math.sin(t * 1.4) * 5 : 0;
+  [bobOffset, bobVel] = springStep(bobOffset, bobVel, bobTarget, 30, 7, dt);
+
+  // ── Blink timer ───────────────────────────────────────────────────────────
+  if (curState === 'idle') {
+    blinkTimer -= dt;
+    if (blinkTimer <= 0) {
+      if (!isBlinking && !isWinking) {
+        // decide: wink or blink?
+        if (Math.random() < 0.25) {
+          isWinking = true;
+          winkSide = Math.random() < 0.5 ? 0 : 1;
+          blinkDuration = 0.18;
+        } else {
+          isBlinking = true;
+          blinkDuration = 0.12;
+        }
+        blinkTimer = 3.2 + Math.random() * 3.5;
+      }
+    }
+    if (isBlinking || isWinking) {
+      blinkDuration -= dt;
+      if (blinkDuration <= 0) { isBlinking = false; isWinking = false; }
+    }
+  } else {
+    isBlinking = false; isWinking = false;
+  }
+
+  // ── Waiting dots ──────────────────────────────────────────────────────────
+  if (curState === 'waiting') {
+    dotTimer -= dt;
+    if (dotTimer <= 0) {
+      dotPhase = (dotPhase + 1) % 3;
+      dotTimer = 0.38;
+    }
+  }
+
+  // ── Gear rotation ─────────────────────────────────────────────────────────
+  if (curState === 'busy') {
+    gearAngle += dt * 3.5;
+    // head micro-shake
+    tiltSpring.target = Math.sin(t * 18) * 0.04;
+  }
+
+  // ── Antenna pulse speed ───────────────────────────────────────────────────
+  const pulseSpeed = curState === 'busy' ? 8 : curState === 'waiting' ? 4 : 1.5;
+  antennaPulse += dt * pulseSpeed;
+
+  // ── Particles ─────────────────────────────────────────────────────────────
+  updateParticles(dt);
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  draw(dt);
+
+  requestAnimationFrame(update);
+}
+
+requestAnimationFrame(update);
+</script>
+</body>
+</html>

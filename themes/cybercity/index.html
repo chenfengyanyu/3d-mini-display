@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cybercity Status Monitor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─── State machine ────────────────────────────────────────────────────────────
+let curState = 'idle';
+function handleState(s) {
+  if (!['busy','waiting','idle'].includes(s) || s === curState) return;
+  curState = s;
+}
+window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+if (window.self === window.top) {
+  (async function poll() {
+    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+    setTimeout(poll, 1000);
+  })();
+}
+
+// ─── Canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+  generateAllLayers();
+}
+window.addEventListener('resize', resize);
+
+// ─── Seeded PRNG (mulberry32) ─────────────────────────────────────────────────
+function seededRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s += 0x6D2B79F5;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ─── Building generation ──────────────────────────────────────────────────────
+// Layer configs
+const LAYERS = [
+  { id: 'far',  speed: 8,  seed: 1001, minH: 0.30, maxH: 0.60, minW: 40, maxW: 90,  windowRows: 2, windowCols: 2, baseY: 0.55, alpha: 0.55 },
+  { id: 'mid',  speed: 20, seed: 2002, minH: 0.22, maxH: 0.45, minW: 30, maxW: 70,  windowRows: 4, windowCols: 3, baseY: 0.65, alpha: 0.80 },
+  { id: 'near', speed: 40, seed: 3003, minH: 0.10, maxH: 0.28, minW: 25, maxW: 60,  windowRows: 3, windowCols: 4, baseY: 0.78, alpha: 1.00 },
+];
+
+// Window neon colors
+const WIN_COLORS = [
+  '#88aaff', '#aaccff', '#ffee88', '#ffcc44',
+  '#ff4444', '#ff8844', '#44ffcc', '#ff44aa',
+  '#ffffff', '#ccddff',
+];
+
+let layerBuildings = {}; // { far: [...], mid: [...], near: [...] }
+let layerOffsets  = { far: 0, mid: 0, near: 0 };
+
+function generateLayer(cfg) {
+  const rng = seededRng(cfg.seed);
+  const buildings = [];
+  let x = 0;
+  // Generate enough buildings to fill 3× screen width so wrapping is seamless
+  const totalWidth = Math.max(W * 3, 2400);
+  while (x < totalWidth) {
+    const bw = cfg.minW + rng() * (cfg.maxW - cfg.minW);
+    const bh = (cfg.minH + rng() * (cfg.maxH - cfg.minH)) * H;
+    const baseColor = `hsl(${200 + rng()*40},${10+rng()*15}%,${8+rng()*10}%)`;
+    // Generate windows
+    const windows = [];
+    const cols = Math.max(1, Math.floor(bw / 14));
+    const rows = Math.max(1, Math.floor(bh / 14));
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        windows.push({
+          col, row,
+          color: WIN_COLORS[Math.floor(rng() * WIN_COLORS.length)],
+          on: rng() > 0.45,
+          flickerRate: 0.3 + rng() * 3.0,
+          phase: rng() * Math.PI * 2,
+          // rooftop antenna on some buildings
+        });
+      }
+    }
+    const hasAntenna = rng() > 0.65;
+    const hasTank = rng() > 0.80;
+    const hasAlertLight = rng() > 0.75;
+    const alertPhase = rng() * Math.PI * 2;
+    buildings.push({ x, w: bw, h: bh, baseColor, windows, cols, rows,
+                     hasAntenna, hasTank, hasAlertLight, alertPhase });
+    x += bw + rng() * 4; // tiny gap
+  }
+  return buildings;
+}
+
+function generateAllLayers() {
+  LAYERS.forEach(cfg => {
+    layerBuildings[cfg.id] = generateLayer(cfg);
+  });
+}
+
+// ─── Rain particles ───────────────────────────────────────────────────────────
+const MAX_RAIN = 600;
+const rainDrops = [];
+for (let i = 0; i < MAX_RAIN; i++) {
+  rainDrops.push(newDrop(true));
+}
+function newDrop(randomY) {
+  return {
+    x: Math.random() * 2000,
+    y: randomY ? Math.random() * 1000 : -10,
+    len: 8 + Math.random() * 14,
+    speed: 350 + Math.random() * 250,
+    dx: -60 + Math.random() * -40,
+  };
+}
+
+// ─── Stars ────────────────────────────────────────────────────────────────────
+const STARS = [];
+for (let i = 0; i < 180; i++) {
+  STARS.push({
+    x: Math.random(),
+    y: Math.random() * 0.5,
+    r: 0.4 + Math.random() * 1.2,
+    twinklePhase: Math.random() * Math.PI * 2,
+    twinkleSpeed: 0.5 + Math.random() * 1.5,
+  });
+}
+
+// ─── Meteors ──────────────────────────────────────────────────────────────────
+const meteors = [];
+let nextMeteor = 4 + Math.random() * 8;
+
+// ─── Flying vehicles ─────────────────────────────────────────────────────────
+const vehicles = [];
+for (let i = 0; i < 6; i++) {
+  vehicles.push(newVehicle(true));
+}
+function newVehicle(randomX) {
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  return {
+    x: randomX ? Math.random() * 2000 : (dir > 0 ? -30 : 2030),
+    y: 0.25 + Math.random() * 0.35,
+    speed: (15 + Math.random() * 30) * dir,
+    color: Math.random() > 0.5 ? '#ff4488' : '#44aaff',
+    tail: 6 + Math.random() * 10,
+    blink: Math.random() * Math.PI * 2,
+    blinkSpeed: 2 + Math.random() * 3,
+  };
+}
+
+// ─── Lightning ────────────────────────────────────────────────────────────────
+let lightningFlash = 0; // seconds remaining
+let nextLightning = 3 + Math.random() * 7;
+
+// ─── Smooth state lerp ────────────────────────────────────────────────────────
+// Lerp targets for: rainRate (0-1), skyT (0=idle,0.5=waiting,1=busy), tint
+let lerpState = { rainRate: 0, skyT: 0 };
+let targetState = { rainRate: 0, skyT: 0 };
+
+// ─── Puddle reflections ───────────────────────────────────────────────────────
+const PUDDLES = [];
+for (let i = 0; i < 12; i++) {
+  PUDDLES.push({
+    x: Math.random(),
+    w: 0.03 + Math.random() * 0.08,
+    h: 0.006 + Math.random() * 0.008,
+    color: WIN_COLORS[Math.floor(Math.random() * WIN_COLORS.length)],
+    alpha: 0.2 + Math.random() * 0.4,
+  });
+}
+
+// ─── Main loop ────────────────────────────────────────────────────────────────
+let lastTime = null;
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function lerpColor(c1, c2, t) {
+  // c1, c2 are [r,g,b] arrays
+  return [
+    Math.round(lerp(c1[0], c2[0], t)),
+    Math.round(lerp(c1[1], c2[1], t)),
+    Math.round(lerp(c1[2], c2[2], t)),
+  ];
+}
+function rgb(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+// Sky gradient stops: [top, horizon] for each state
+const SKY_COLORS = {
+  idle:    { top: [10,5,35],    hor: [15,8,50]    },
+  waiting: { top: [40,20,5],    hor: [60,30,5]    },
+  busy:    { top: [60,5,5],     hor: [90,10,5]    },
+};
+
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (!lastTime) { lastTime = ts; return; }
+  const dt = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
+
+  // Update lerp targets based on curState
+  if (curState === 'idle') {
+    targetState.rainRate = 0;
+    targetState.skyT = 0;
+  } else if (curState === 'waiting') {
+    targetState.rainRate = 0.25;
+    targetState.skyT = 0.5;
+  } else {
+    targetState.rainRate = 1.0;
+    targetState.skyT = 1.0;
+  }
+
+  const lerpSpeed = 1.2;
+  lerpState.rainRate = lerp(lerpState.rainRate, targetState.rainRate, dt * lerpSpeed);
+  lerpState.skyT     = lerp(lerpState.skyT,     targetState.skyT,     dt * lerpSpeed);
+
+  const t = lerpState.skyT; // 0=idle, 0.5=waiting, 1=busy
+  const rainRate = lerpState.rainRate;
+
+  // ── Sky gradient ──
+  let skyTop, skyHor;
+  if (t <= 0.5) {
+    const tt = t * 2;
+    skyTop = lerpColor(SKY_COLORS.idle.top, SKY_COLORS.waiting.top, tt);
+    skyHor = lerpColor(SKY_COLORS.idle.hor, SKY_COLORS.waiting.hor, tt);
+  } else {
+    const tt = (t - 0.5) * 2;
+    skyTop = lerpColor(SKY_COLORS.waiting.top, SKY_COLORS.busy.top, tt);
+    skyHor = lerpColor(SKY_COLORS.waiting.hor, SKY_COLORS.busy.hor, tt);
+  }
+
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0,   rgb(skyTop));
+  grad.addColorStop(0.6, rgb(skyHor));
+  grad.addColorStop(1,   '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Stars (idle only) ──
+  if (t < 0.6) {
+    const starAlpha = clamp(1 - t / 0.6, 0, 1);
+    STARS.forEach(s => {
+      const tw = Math.sin(s.twinklePhase + ts * 0.001 * s.twinkleSpeed);
+      const a = starAlpha * (0.5 + 0.5 * tw);
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200,220,255,${a.toFixed(2)})`;
+      ctx.fill();
+    });
+  }
+
+  // ── Meteors (idle) ──
+  if (t < 0.5) {
+    nextMeteor -= dt;
+    if (nextMeteor <= 0) {
+      meteors.push({ x: 0.1 + Math.random() * 0.6, y: 0.02 + Math.random() * 0.2,
+                     vx: 180 + Math.random() * 120, vy: 60 + Math.random() * 60,
+                     life: 0.6 + Math.random() * 0.5, maxLife: 0 });
+      meteors[meteors.length-1].maxLife = meteors[meteors.length-1].life;
+      nextMeteor = 5 + Math.random() * 12;
+    }
+    for (let i = meteors.length - 1; i >= 0; i--) {
+      const m = meteors[i];
+      m.life -= dt;
+      if (m.life <= 0) { meteors.splice(i, 1); continue; }
+      const progress = 1 - m.life / m.maxLife;
+      const alpha = clamp((1 - t / 0.5), 0, 1) * Math.sin(progress * Math.PI) * 0.9;
+      const mx = m.x * W + m.vx * progress * m.maxLife;
+      const my = m.y * H + m.vy * progress * m.maxLife;
+      const tailLen = 60 + m.vx * 0.2;
+      const mg = ctx.createLinearGradient(mx - tailLen, my - tailLen * 0.33, mx, my);
+      mg.addColorStop(0, `rgba(255,255,255,0)`);
+      mg.addColorStop(1, `rgba(255,255,255,${alpha.toFixed(2)})`);
+      ctx.beginPath();
+      ctx.moveTo(mx - tailLen, my - tailLen * 0.33);
+      ctx.lineTo(mx, my);
+      ctx.strokeStyle = mg;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // ── Scroll layers ──
+  LAYERS.forEach(cfg => {
+    layerOffsets[cfg.id] = (layerOffsets[cfg.id] + cfg.speed * dt) % (W * 3);
+  });
+
+  // ── Draw building layers ──
+  LAYERS.forEach(cfg => {
+    drawLayer(cfg, ts, t, rainRate);
+  });
+
+  // ── Ground strip ──
+  const groundY = H * 0.88;
+  const groundGrad = ctx.createLinearGradient(0, groundY, 0, H);
+  groundGrad.addColorStop(0, `rgba(5,5,20,0.95)`);
+  groundGrad.addColorStop(1, '#000');
+  ctx.fillStyle = groundGrad;
+  ctx.fillRect(0, groundY, W, H - groundY);
+
+  // Puddle reflections
+  PUDDLES.forEach(p => {
+    const px = p.x * W;
+    const py = groundY + (H - groundY) * 0.25;
+    const pw = p.w * W;
+    const ph = p.h * H;
+    const rg = ctx.createRadialGradient(px + pw/2, py, 0, px + pw/2, py, pw/2);
+    rg.addColorStop(0, p.color.replace(')', `,${(p.alpha * (0.5 + 0.5 * rainRate)).toFixed(2)})`).replace('#', 'rgba(').replace(/([0-9a-f]{2})/gi, (m) => parseInt(m,16)+',').replace(/,$/,''));
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    // simpler approach:
+    ctx.save();
+    ctx.globalAlpha = p.alpha * (0.4 + 0.6 * rainRate);
+    ctx.beginPath();
+    ctx.ellipse(px + pw/2, py, pw/2, ph/2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // Street glow (waiting: amber, busy: red, idle: blue)
+  const glowColor = t < 0.5
+    ? `rgba(${Math.round(lerp(0,80,t*2))},${Math.round(lerp(20,40,t*2))},${Math.round(lerp(80,10,t*2))},0.18)`
+    : `rgba(${Math.round(lerp(80,120,t*2-1))},${Math.round(lerp(40,10,t*2-1))},10,0.22)`;
+  ctx.fillStyle = glowColor;
+  ctx.fillRect(0, groundY - 2, W, 4);
+
+  // ── Flying vehicles ──
+  for (let i = vehicles.length - 1; i >= 0; i--) {
+    const v = vehicles[i];
+    v.x += v.speed * dt;
+    v.blink += v.blinkSpeed * dt;
+    if (v.x > W + 50 || v.x < -50) {
+      vehicles[i] = newVehicle(false);
+      continue;
+    }
+    const vy = v.y * H;
+    const blinkA = 0.5 + 0.5 * Math.sin(v.blink);
+    // tail
+    const tailGrad = ctx.createLinearGradient(v.x - Math.sign(v.speed) * v.tail, vy, v.x, vy);
+    tailGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    tailGrad.addColorStop(1, v.color.replace('#','rgba(').replace(/([0-9a-f]{2})/gi, (m,_) => parseInt(m,16)+',').replace(/,$/,`,${(0.6 * blinkA).toFixed(2)})`));
+    ctx.beginPath();
+    ctx.moveTo(v.x - Math.sign(v.speed) * v.tail, vy);
+    ctx.lineTo(v.x, vy);
+    ctx.strokeStyle = tailGrad;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // dot
+    ctx.beginPath();
+    ctx.arc(v.x, vy, 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${blinkA.toFixed(2)})`;
+    ctx.fill();
+  }
+
+  // ── Rain ──
+  if (rainRate > 0.01) {
+    const activeCount = Math.floor(rainRate * MAX_RAIN);
+    ctx.save();
+    ctx.strokeStyle = `rgba(160,200,255,${(0.25 + 0.3 * rainRate).toFixed(2)})`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let i = 0; i < activeCount; i++) {
+      const d = rainDrops[i];
+      d.y += d.speed * dt;
+      d.x += d.dx * dt;
+      if (d.y > H + 20) { rainDrops[i] = newDrop(false); rainDrops[i].x = Math.random() * W; }
+      if (d.x < -20) rainDrops[i].x = W + 20;
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x + d.dx * 0.05, d.y + d.len);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Lightning (busy) ──
+  if (curState === 'busy') {
+    nextLightning -= dt;
+    if (nextLightning <= 0) {
+      lightningFlash = 0.05;
+      nextLightning = 2 + Math.random() * 8;
+    }
+  }
+  if (lightningFlash > 0) {
+    const fa = clamp(lightningFlash / 0.05, 0, 1);
+    ctx.fillStyle = `rgba(255,255,255,${(fa * 0.35).toFixed(2)})`;
+    ctx.fillRect(0, 0, W, H);
+    lightningFlash -= dt;
+  }
+
+  // ── Overlay vignette ──
+  const vig = ctx.createRadialGradient(W/2, H/2, H*0.2, W/2, H/2, H*0.85);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ─── Draw one building layer ───────────────────────────────────────────────────
+function drawLayer(cfg, ts, skyT, rainRate) {
+  const buildings = layerBuildings[cfg.id];
+  if (!buildings) return;
+  const offset = layerOffsets[cfg.id];
+  const baseY = cfg.baseY * H;
+  const totalW = W * 3;
+
+  ctx.save();
+  ctx.globalAlpha = cfg.alpha;
+
+  buildings.forEach(b => {
+    // wrap x position
+    let bx = ((b.x - offset) % totalW + totalW) % totalW;
+    // draw twice to ensure seamless wrap
+    for (let wrap = 0; wrap < 2; wrap++) {
+      const drawX = bx - totalW * wrap;
+      if (drawX + b.w < -10 || drawX > W + 10) continue;
+
+      const by = baseY - b.h;
+
+      // Building silhouette
+      ctx.fillStyle = b.baseColor;
+      ctx.fillRect(drawX, by, b.w, b.h);
+
+      // Antenna
+      if (b.hasAntenna) {
+        ctx.fillStyle = '#333';
+        ctx.fillRect(drawX + b.w * 0.5 - 1, by - 12, 2, 12);
+        ctx.beginPath();
+        ctx.arc(drawX + b.w * 0.5, by - 14, 2, 0, Math.PI * 2);
+        ctx.fillStyle = curState === 'busy' ? '#ff2222' : '#ff4444';
+        ctx.globalAlpha = cfg.alpha * (0.5 + 0.5 * Math.sin(ts * 0.003 + b.alertPhase * 3));
+        ctx.fill();
+        ctx.globalAlpha = cfg.alpha;
+      }
+
+      // Water tower
+      if (b.hasTank) {
+        const tx = drawX + b.w * 0.3;
+        const ty = by - 8;
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(tx, ty, 10, 8);
+        ctx.beginPath();
+        ctx.arc(tx + 5, ty, 5, Math.PI, 0);
+        ctx.fill();
+      }
+
+      // Alert / rotating light (busy)
+      if (b.hasAlertLight && curState === 'busy') {
+        const lx = drawX + b.w * 0.7;
+        const ly = by - 3;
+        const phase = ts * 0.003 * 2 + b.alertPhase;
+        const pulse = 0.3 + 0.7 * Math.abs(Math.sin(phase));
+        ctx.beginPath();
+        ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,30,30,${pulse.toFixed(2)})`;
+        ctx.globalAlpha = cfg.alpha * pulse;
+        ctx.fill();
+        // sweep cone
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        const sweepAngle = phase * 2;
+        ctx.arc(lx, ly, 20, sweepAngle, sweepAngle + 0.5);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(255,60,60,0.12)`;
+        ctx.fill();
+        ctx.globalAlpha = cfg.alpha;
+      }
+
+      // Windows
+      const ww = Math.max(3, b.w / b.cols - 3);
+      const wh = Math.max(3, b.h / b.rows - 4);
+      const colStep = b.w / b.cols;
+      const rowStep = b.h / b.rows;
+
+      b.windows.forEach(win => {
+        // Flicker
+        const flicker = Math.sin(ts * 0.001 * win.flickerRate + win.phase);
+        const isOn = win.on ? flicker > -0.7 : flicker > 0.92;
+        if (!isOn) return;
+
+        const wx = drawX + win.col * colStep + 2;
+        const wy = by + win.row * rowStep + 3;
+
+        // Window glow
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = win.color;
+        ctx.fillStyle = win.color;
+        ctx.globalAlpha = cfg.alpha * (0.7 + 0.3 * Math.abs(flicker));
+        ctx.fillRect(wx, wy, ww, wh);
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = cfg.alpha;
+      });
+
+      // Billboard (near layer only)
+      if (cfg.id === 'near' && b.w > 40) {
+        const bww = b.w * 0.6;
+        const bwh = 10;
+        const bwx = drawX + b.w * 0.2;
+        const bwy = by + b.h * 0.15;
+        const billColors = ['#ff0055','#00ffcc','#ff9900','#aa00ff'];
+        const bColor = billColors[Math.floor((b.x * 7 + 13) % billColors.length)];
+        const billAlpha = 0.4 + 0.3 * Math.abs(Math.sin(ts * 0.002 + b.alertPhase));
+        ctx.fillStyle = bColor;
+        ctx.globalAlpha = cfg.alpha * billAlpha;
+        ctx.fillRect(bwx, bwy, bww, bwh);
+        ctx.globalAlpha = cfg.alpha;
+      }
+    }
+  });
+
+  ctx.restore();
+}
+
+// ─── Boot ──────────────────────────────────────────────────────────────────────
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

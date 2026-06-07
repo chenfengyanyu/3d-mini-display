@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Network Status</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  // ── State machine ──────────────────────────────────────────────────────────
+  let curState = 'idle';
+  function handleState(s) {
+    if (!['busy', 'waiting', 'idle'].includes(s) || s === curState) return;
+    curState = s;
+  }
+  window.addEventListener('message', ({ data: d }) => { if (d?.state) handleState(d.state); });
+  if (window.self === window.top) {
+    (async function poll() {
+      try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
+      setTimeout(poll, 1000);
+    })();
+  }
+
+  // ── Canvas setup ───────────────────────────────────────────────────────────
+  const canvas = document.getElementById('c');
+  const ctx    = canvas.getContext('2d');
+
+  let W = 0, H = 0;
+  function resize() {
+    W = canvas.width  = canvas.offsetWidth  * devicePixelRatio;
+    H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+    buildNetwork();
+  }
+  window.addEventListener('resize', resize);
+
+  // ── State palette ──────────────────────────────────────────────────────────
+  const PALETTES = {
+    busy:    { node: '#ff4444', edge: '#ff6600', particle: '#ff8800', glow: '#ff2200', bg: 'rgba(255,40,0,0.03)' },
+    waiting: { node: '#fbbf24', edge: '#d97706', particle: '#fde68a', glow: '#f59e0b', bg: 'rgba(251,191,36,0.025)' },
+    idle:    { node: '#22d3ee', edge: '#0891b2', particle: '#67e8f9', glow: '#06b6d4', bg: 'rgba(34,211,238,0.02)' },
+  };
+
+  // Lerped (smooth) palette values — stored as {r,g,b} triples
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function lerpRgb(a, b, t) {
+    return { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t };
+  }
+  function rgbStr(c, alpha) {
+    return `rgba(${c.r|0},${c.g|0},${c.b|0},${alpha.toFixed(3)})`;
+  }
+
+  // Current smooth palette (lerped)
+  let smooth = {
+    node:     hexToRgb(PALETTES.idle.node),
+    edge:     hexToRgb(PALETTES.idle.edge),
+    particle: hexToRgb(PALETTES.idle.particle),
+    glow:     hexToRgb(PALETTES.idle.glow),
+  };
+
+  // ── Network topology ───────────────────────────────────────────────────────
+  const LAYER_SIZES = [3, 5, 6, 5, 3];
+  let nodes = [];   // { x, y, flash, breathPhase }
+  let edges = [];   // { from, to }  (indices into nodes[])
+
+  function buildNetwork() {
+    nodes = [];
+    edges = [];
+
+    const layerCount = LAYER_SIZES.length;
+    const padX = W * 0.12;
+    const padY = H * 0.12;
+    const usableW = W - padX * 2;
+    const usableH = H - padY * 2;
+
+    // Build nodes
+    for (let li = 0; li < layerCount; li++) {
+      const count = LAYER_SIZES[li];
+      const x = padX + (li / (layerCount - 1)) * usableW;
+      for (let ni = 0; ni < count; ni++) {
+        const y = padY + (count === 1 ? usableH / 2 : (ni / (count - 1)) * usableH);
+        nodes.push({ x, y, flash: 0, breathPhase: Math.random() * Math.PI * 2 });
+      }
+    }
+
+    // Build edges (fully connect adjacent layers)
+    let offset = 0;
+    for (let li = 0; li < layerCount - 1; li++) {
+      const countA = LAYER_SIZES[li];
+      const countB = LAYER_SIZES[li + 1];
+      const offsetB = offset + countA;
+      for (let a = 0; a < countA; a++) {
+        for (let b = 0; b < countB; b++) {
+          edges.push({ from: offset + a, to: offsetB + b });
+        }
+      }
+      offset += countA;
+    }
+  }
+
+  // ── Particles ──────────────────────────────────────────────────────────────
+  let particles = [];
+  // { edgeIdx, t, speed, color (rgb object) }
+
+  // Spawn rate config per state
+  const SPAWN_CFG = {
+    busy:    { rate: 6.0, activeEdgeFrac: 0.30 },
+    waiting: { rate: 1.5, activeEdgeFrac: 0.15 },
+    idle:    { rate: 0.3, activeEdgeFrac: 0.08 },
+  };
+
+  // Which edges are "active" — recomputed on state change or periodically
+  let activeEdges = new Set();
+  let lastStateForEdges = '';
+  let edgeRefreshTimer = 0;
+
+  function refreshActiveEdges() {
+    const cfg = SPAWN_CFG[curState];
+    const count = Math.max(1, Math.round(edges.length * cfg.activeEdgeFrac));
+    activeEdges = new Set();
+    // Shuffle-pick
+    const indices = Array.from({ length: edges.length }, (_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    for (let i = 0; i < count; i++) activeEdges.add(indices[i]);
+  }
+
+  // Particle speed range per state (fraction of edge per second)
+  const SPEED_CFG = {
+    busy:    { min: 0.9, max: 1.6 },
+    waiting: { min: 0.5, max: 0.9 },
+    idle:    { min: 0.2, max: 0.45 },
+  };
+
+  // Accumulated spawn time per active edge
+  let spawnAccum = {};
+
+  // ── Smooth lerp values ─────────────────────────────────────────────────────
+  let lerpRate = 0;    // 0..1 spawn rate lerp
+  let lerpBreath = 0;  // idle breathing intensity 0..1
+
+  // ── Main loop ──────────────────────────────────────────────────────────────
+  let lastTime = null;
+  let time = 0;
+
+  function frame(ts) {
+    requestAnimationFrame(frame);
+
+    const dt = lastTime === null ? 0.016 : Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    time += dt;
+
+    // Refresh active edges periodically or on state change
+    edgeRefreshTimer -= dt;
+    if (lastStateForEdges !== curState || edgeRefreshTimer <= 0) {
+      refreshActiveEdges();
+      lastStateForEdges = curState;
+      edgeRefreshTimer = 2.5 + Math.random() * 2;
+      spawnAccum = {};
+    }
+
+    // Lerp palette
+    const targetPal = PALETTES[curState];
+    const lf = Math.min(1, dt * 1.5);
+    smooth.node     = lerpRgb(smooth.node,     hexToRgb(targetPal.node),     lf);
+    smooth.edge     = lerpRgb(smooth.edge,     hexToRgb(targetPal.edge),     lf);
+    smooth.particle = lerpRgb(smooth.particle, hexToRgb(targetPal.particle), lf);
+    smooth.glow     = lerpRgb(smooth.glow,     hexToRgb(targetPal.glow),     lf);
+
+    // Lerp breathing
+    const breathTarget = curState === 'idle' ? 1 : 0;
+    lerpBreath += (breathTarget - lerpBreath) * lf;
+
+    // Lerp spawn rate (0 = idle rate, 1 = busy rate)
+    const rateTarget = curState === 'busy' ? 1 : curState === 'waiting' ? 0.5 : 0;
+    lerpRate += (rateTarget - lerpRate) * lf;
+
+    // Spawn particles
+    const spawnRate = SPAWN_CFG.idle.rate + (SPAWN_CFG.busy.rate - SPAWN_CFG.idle.rate) * lerpRate;
+    const speedCfg  = SPEED_CFG[curState];
+
+    for (const ei of activeEdges) {
+      if (spawnAccum[ei] === undefined) spawnAccum[ei] = Math.random();
+      spawnAccum[ei] += spawnRate * dt;
+      while (spawnAccum[ei] >= 1) {
+        spawnAccum[ei] -= 1;
+        const speed = speedCfg.min + Math.random() * (speedCfg.max - speedCfg.min);
+        particles.push({ edgeIdx: ei, t: 0, speed, col: { ...smooth.particle } });
+      }
+    }
+
+    // Update particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.t += p.speed * dt;
+      if (p.t >= 1) {
+        // Flash destination node
+        const edge = edges[p.edgeIdx];
+        if (edge) nodes[edge.to].flash = 1.0;
+        particles.splice(i, 1);
+      }
+    }
+
+    // Decay node flash
+    for (const n of nodes) {
+      if (n.flash > 0) n.flash = Math.max(0, n.flash - dt * 3.5);
+    }
+
+    draw(dt);
+  }
+
+  // ── Draw ───────────────────────────────────────────────────────────────────
+  function draw(dt) {
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    drawGrid();
+    drawRadialGlow();
+    drawEdges();
+    drawParticles();
+    drawNodes();
+  }
+
+  function drawGrid() {
+    const step = Math.round(W / 40);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let x = 0; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawRadialGlow() {
+    const cx = W / 2, cy = H / 2;
+    const r  = Math.min(W, H) * 0.55;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, rgbStr(smooth.glow, 0.06));
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawEdges() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let ei = 0; ei < edges.length; ei++) {
+      const e  = edges[ei];
+      const nA = nodes[e.from];
+      const nB = nodes[e.to];
+      const alpha = activeEdges.has(ei) ? 0.18 : 0.06;
+      ctx.strokeStyle = rgbStr(smooth.edge, alpha);
+      ctx.lineWidth   = 0.8;
+      ctx.beginPath();
+      // Slight bezier curve
+      const cpx = (nA.x + nB.x) / 2;
+      const cpy = (nA.y + nB.y) / 2 + (nA.y - nB.y) * 0.05;
+      ctx.moveTo(nA.x, nA.y);
+      ctx.quadraticCurveTo(cpx, cpy, nB.x, nB.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      const e  = edges[p.edgeIdx];
+      if (!e) continue;
+      const nA = nodes[e.from];
+      const nB = nodes[e.to];
+
+      // Interpolate along quadratic bezier
+      const t   = p.t;
+      const mt  = 1 - t;
+      const cpx = (nA.x + nB.x) / 2;
+      const cpy = (nA.y + nB.y) / 2 + (nA.y - nB.y) * 0.05;
+      const px  = mt * mt * nA.x + 2 * mt * t * cpx + t * t * nB.x;
+      const py  = mt * mt * nA.y + 2 * mt * t * cpy + t * t * nB.y;
+
+      // Fade in/out at ends
+      const fade = Math.sin(t * Math.PI);
+      const radius = (3 + 2 * fade) * devicePixelRatio;
+
+      // Outer glow
+      const glow = ctx.createRadialGradient(px, py, 0, px, py, radius * 4);
+      glow.addColorStop(0, rgbStr(p.col, 0.9 * fade));
+      glow.addColorStop(0.4, rgbStr(p.col, 0.35 * fade));
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(px, py, radius * 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core
+      ctx.shadowBlur  = 18 * devicePixelRatio;
+      ctx.shadowColor = rgbStr(p.col, 1);
+      ctx.fillStyle   = rgbStr(p.col, Math.min(1, fade * 1.2));
+      ctx.beginPath();
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  function drawNodes() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    const baseR = Math.min(W, H) * 0.018;
+
+    for (let ni = 0; ni < nodes.length; ni++) {
+      const n = nodes[ni];
+
+      // Breathing (idle)
+      const breathOsc = 0.5 + 0.5 * Math.sin(time * (2 * Math.PI / 3) + n.breathPhase);
+      const breathAlpha = 0.3 + breathOsc * 0.4; // 0.3 – 0.7
+      const nodeAlpha = (1 - lerpBreath) * 0.55 + lerpBreath * breathAlpha;
+
+      // Flash
+      const flashBoost = n.flash;
+      const totalAlpha = Math.min(1, nodeAlpha + flashBoost * 0.8);
+      const glowMult   = 1 + flashBoost * 3;
+
+      // Outer glow halo
+      const haloR = baseR * (2.5 + flashBoost * 2);
+      const grad  = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, haloR);
+      grad.addColorStop(0,   rgbStr(smooth.glow, totalAlpha * 0.5 * glowMult));
+      grad.addColorStop(0.5, rgbStr(smooth.glow, totalAlpha * 0.15));
+      grad.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, haloR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Node fill
+      ctx.shadowBlur  = (20 + flashBoost * 30) * devicePixelRatio;
+      ctx.shadowColor = rgbStr(smooth.glow, 1);
+      ctx.fillStyle   = rgbStr(smooth.node, totalAlpha * 0.4);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, baseR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Node stroke
+      ctx.strokeStyle = rgbStr(smooth.node, Math.min(1, totalAlpha * 1.1 * glowMult));
+      ctx.lineWidth   = 1.5 * devicePixelRatio;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, baseR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  // ── Boot ───────────────────────────────────────────────────────────────────
+  resize();
+  requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
