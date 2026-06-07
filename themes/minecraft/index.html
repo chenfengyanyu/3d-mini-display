@@ -192,8 +192,6 @@ function buildWorldCanvas() {
   rc = ctx;  // restore
 }
 
-resize();
-
 // ── State ──────────────────────────────────────────────
 let curState = 'idle';
 let dayness = 1.0, duskness = 0.0;
@@ -364,23 +362,24 @@ function spawnZombie(x) {
   };
 }
 
+// clouds needs W, so it's populated here (called after resize sets W)
+let clouds = [];
+
 function initCharacters() {
-  villagers.length = 0; zombies.length = 0;
+  villagers.length = 0; zombies.length = 0; clouds.length = 0;
   villagers.push(spawnVillager(W*0.15));
   villagers.push(spawnVillager(W*0.45));
   villagers.push(spawnVillager(W*0.72));
-  villagers.push(spawnVillager(W*0.88));  // extra villager
+  villagers.push(spawnVillager(W*0.88));
   zombies.push(spawnZombie(W*1.05));
   zombies.push(spawnZombie(W*1.22));
   zombies.push(spawnZombie(W*1.40));
-  zombies.push(spawnZombie(W*1.60));      // extra zombie
+  zombies.push(spawnZombie(W*1.60));
+  // Clouds need W — safe to init here (called from resize, after W is set)
+  for (let i = 0; i < 5; i++) {
+    clouds.push({ x: W*(i/5+0.1), y: 0.07+i*0.035, w: 3+(i%3), h: 1+(i%2)*0.5 });
+  }
 }
-initCharacters();
-
-// ── Clouds ────────────────────────────────────────────
-const clouds = Array.from({length:5}, (_,i) => ({
-  x: W*(i/5+0.1), y: 0.07+i*0.035, w: 3+(i%3), h: 1+(i%2)*0.5
-}));
 
 // ── Star positions (fixed, computed once) ─────────────
 const STARS = Array.from({length:55}, (_,i)=>({
@@ -588,6 +587,8 @@ function drawBadge(sec) {
   ctx.fillText(label, bx+pad*1.5+dotR+fh*1.1, by+bh*0.68);
 }
 
+// ── Boot — called here so ALL variables above are fully declared ──────────────
+resize();
 handleState('idle');
 requestAnimationFrame(frame);
 </script>
