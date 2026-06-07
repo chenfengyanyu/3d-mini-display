@@ -18,19 +18,22 @@ const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
-let W, H, BS;  // BS = block size in CSS px
-let worldW;    // number of tile columns
-const SURFACE  = 8;   // tile row index of grass surface (sky = 0..SURFACE-1)
-const WORLD_H  = 16;  // total tile rows
+let W, H, BS;
+let worldW;
+const SURFACE = 8;
+const WORLD_H = 16;
 
-// ── Tile IDs ──────────────────────────────────────────
 const T = { AIR:0, GRASS:1, DIRT:2, STONE:3, COAL:4, IRON:5,
             GOLD:6, DIAMOND:7, REDSTONE:8, GRAVEL:9,
             PLANKS:10, STONE_BRICK:11, GLASS:12, LOG:13,
             LEAVES:14, BEDROCK:15 };
 
-// Static world tile array (regenerated on resize)
 let tiles = [];
+
+// ── Offscreen world canvas (perf: draw static world once, blit every frame) ──
+let worldCanvas = null, wCtx = null;
+// rc = current drawing target (swapped between ctx and wCtx during build)
+let rc = ctx;
 
 // ── DPR / Resize ──────────────────────────────────────
 function resize() {
@@ -44,655 +47,547 @@ function resize() {
   BS = Math.max(8, Math.floor(H / WORLD_H));
   worldW = Math.ceil(W / BS) + 6;
   buildWorld();
+  buildWorldCanvas();
+  initCharacters();
 }
 window.addEventListener('resize', resize);
 
 // ── World generation ──────────────────────────────────
 function buildWorld() {
   tiles = [];
-  // Seed-based "random" for deterministic world
   let seed = 42;
-  const rnd = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; };
-
+  const rnd = () => { seed = (seed*1664525+1013904223)&0xffffffff; return (seed>>>0)/0xffffffff; };
   for (let row = 0; row < WORLD_H; row++) {
     tiles[row] = [];
     for (let col = 0; col < worldW; col++) {
       let t = T.AIR;
-      if (row === SURFACE)     t = T.GRASS;
-      else if (row === SURFACE+1 || row === SURFACE+2) t = T.DIRT;
-      else if (row >= SURFACE+3 && row < WORLD_H-1) {
+      if (row === SURFACE) t = T.GRASS;
+      else if (row <= SURFACE+2) t = T.DIRT;
+      else if (row < WORLD_H-1) {
         const r = rnd();
-        if      (r < 0.03) t = T.COAL;
+        if      (r < 0.030) t = T.COAL;
         else if (r < 0.055 && row >= SURFACE+4) t = T.IRON;
-        else if (r < 0.07  && row >= SURFACE+5) t = T.GOLD;
+        else if (r < 0.070 && row >= SURFACE+5) t = T.GOLD;
         else if (r < 0.082 && row >= SURFACE+6) t = T.DIAMOND;
         else if (r < 0.095 && row >= SURFACE+5) t = T.REDSTONE;
-        else if (r < 0.11)  t = T.GRAVEL;
+        else if (r < 0.110) t = T.GRAVEL;
         else t = T.STONE;
-      } else if (row === WORLD_H-1) t = T.BEDROCK;
+      } else t = T.BEDROCK;
       tiles[row][col] = t;
     }
   }
 }
+
+// ── Block draw (uses global rc, not ctx, for offscreen support) ──────────────
+function drawBlock(col, row, tid) {
+  const x = col * BS, y = row * BS;
+  switch (tid) {
+    case T.GRASS:
+      rc.fillStyle = '#7A5C38'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = '#6BC229'; rc.fillRect(x, y, BS, Math.max(2, BS*0.22));
+      rc.fillStyle = '#7DC836';
+      for (let i=0;i<3;i++) rc.fillRect(x+(i*3+1)*(BS/10), y, Math.max(1,BS/12), Math.max(1,BS*0.18));
+      break;
+    case T.DIRT:
+      rc.fillStyle = '#7A5C38'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = 'rgba(0,0,0,0.08)'; rc.fillRect(x+BS*0.85, y, BS*0.15, BS); rc.fillRect(x, y+BS*0.85, BS, BS*0.15);
+      break;
+    case T.STONE:
+      rc.fillStyle = '#828282'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = 'rgba(0,0,0,0.1)'; rc.fillRect(x+BS*0.85, y, BS*0.15, BS); rc.fillRect(x, y+BS*0.85, BS, BS*0.15);
+      break;
+    case T.COAL: case T.IRON: case T.GOLD: case T.DIAMOND: case T.REDSTONE: {
+      const oreColor = { [T.COAL]:'#252525', [T.IRON]:'#CEAB8F', [T.GOLD]:'#FCEA41', [T.DIAMOND]:'#60F0F0', [T.REDSTONE]:'#FF1A1A' };
+      rc.fillStyle = '#828282'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = oreColor[tid];
+      rc.fillRect(x+BS*0.20, y+BS*0.25, BS*0.25, BS*0.20);
+      rc.fillRect(x+BS*0.55, y+BS*0.50, BS*0.25, BS*0.20);
+      rc.fillRect(x+BS*0.15, y+BS*0.55, BS*0.20, BS*0.20);
+      rc.fillRect(x+BS*0.60, y+BS*0.20, BS*0.20, BS*0.20);
+      rc.fillStyle = 'rgba(0,0,0,0.1)'; rc.fillRect(x+BS*0.85,y,BS*0.15,BS); rc.fillRect(x,y+BS*0.85,BS,BS*0.15);
+      break;
+    }
+    case T.GRAVEL:
+      rc.fillStyle = '#8A7B6C'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = 'rgba(0,0,0,0.12)'; rc.fillRect(x+BS*0.2,y+BS*0.15,BS*0.25,BS*0.25); rc.fillRect(x+BS*0.55,y+BS*0.5,BS*0.3,BS*0.2);
+      break;
+    case T.PLANKS:
+      rc.fillStyle = '#A07942'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = '#956D38';
+      for (let i=0;i<3;i++) rc.fillRect(x, y+i*(BS/3), BS, Math.max(1,1));
+      rc.fillRect(x+BS/2, y, Math.max(1,1), BS);
+      break;
+    case T.STONE_BRICK:
+      rc.fillStyle = '#888888'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = '#666666';
+      rc.fillRect(x, y+BS/2, BS, Math.max(1,1)); rc.fillRect(x+BS/4, y, Math.max(1,1), BS/2); rc.fillRect(x+BS*3/4, y+BS/2, Math.max(1,1), BS/2);
+      break;
+    case T.GLASS:
+      rc.fillStyle = 'rgba(160,220,255,0.4)'; rc.fillRect(x, y, BS, BS);
+      rc.strokeStyle = 'rgba(200,240,255,0.7)'; rc.lineWidth = Math.max(1,BS/12); rc.strokeRect(x+BS*0.1,y+BS*0.1,BS*0.8,BS*0.8);
+      break;
+    case T.LOG:
+      rc.fillStyle = '#5C3E1E'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = '#3D2A0E'; rc.fillRect(x+BS*0.3,y+BS*0.3,BS*0.4,BS*0.4);
+      rc.fillRect(x+BS*0.15,y,BS*0.7,Math.max(1,BS*0.1)); rc.fillRect(x+BS*0.15,y+BS*0.9,BS*0.7,Math.max(1,BS*0.1));
+      break;
+    case T.LEAVES:
+      rc.fillStyle = '#4E9227'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = 'rgba(0,0,0,0.1)'; rc.fillRect(x,y+BS*0.75,BS,BS*0.25); rc.fillRect(x+BS*0.75,y,BS*0.25,BS);
+      rc.fillStyle = '#5BAD30'; rc.fillRect(x+BS*0.1,y+BS*0.1,BS*0.3,BS*0.3); rc.fillRect(x+BS*0.55,y+BS*0.5,BS*0.3,BS*0.3);
+      break;
+    case T.BEDROCK:
+      rc.fillStyle = '#282828'; rc.fillRect(x, y, BS, BS);
+      rc.fillStyle = 'rgba(60,60,60,0.5)'; rc.fillRect(x+BS*0.3,y+BS*0.2,BS*0.2,BS*0.2); rc.fillRect(x+BS*0.1,y+BS*0.6,BS*0.25,BS*0.2);
+      break;
+  }
+}
+
+function drawTree(col) {
+  drawBlock(col, SURFACE-1, T.LOG); drawBlock(col, SURFACE-2, T.LOG); drawBlock(col, SURFACE-3, T.LOG);
+  for (let dc=-1; dc<=1; dc++) { drawBlock(col+dc,SURFACE-3,T.LEAVES); drawBlock(col+dc,SURFACE-4,T.LEAVES); if(dc!==0) drawBlock(col+dc,SURFACE-5,T.LEAVES); }
+  drawBlock(col,SURFACE-5,T.LEAVES); drawBlock(col,SURFACE-6,T.LEAVES);
+}
+
+function drawHouseBlocks(originCol) {
+  for (let c=0;c<5;c++) drawBlock(originCol+c, SURFACE,   T.STONE_BRICK);
+  for (let c=0;c<5;c++) drawBlock(originCol+c, SURFACE-1, c===1||c===3 ? T.GLASS : T.PLANKS);
+  for (let c=0;c<5;c++) drawBlock(originCol+c, SURFACE-2, c===1||c===3 ? T.GLASS : T.PLANKS);
+  for (let c=-1;c<=5;c++) drawBlock(originCol+c, SURFACE-3, T.STONE_BRICK);
+  for (let c=0;c<5;c++) drawBlock(originCol+c, SURFACE-4, T.LOG);
+}
+
+// Pre-compute positions for later dynamic drawing
+let treePositions = [], housePositions = [];
+
+function buildWorldCanvas() {
+  worldCanvas = document.createElement('canvas');
+  worldCanvas.width  = W;
+  worldCanvas.height = H;
+  wCtx = worldCanvas.getContext('2d');
+  wCtx.imageSmoothingEnabled = false;
+  rc = wCtx;  // redirect drawBlock calls to offscreen canvas
+
+  // Underground background: two solid fills (stone + dirt tone) — fastest possible
+  wCtx.fillStyle = '#1A1008'; wCtx.fillRect(0, SURFACE*BS, W, H - SURFACE*BS);
+  wCtx.fillStyle = '#828282'; wCtx.fillRect(0, (SURFACE+3)*BS, W, (WORLD_H-SURFACE-3)*BS);
+  wCtx.fillStyle = '#7A5C38'; wCtx.fillRect(0, (SURFACE+1)*BS, W, 2*BS);
+
+  // Draw only non-stone underground tiles (ores, gravel) — ~15% of blocks
+  for (let row = SURFACE; row < WORLD_H; row++) {
+    for (let col = 0; col < worldW; col++) {
+      const t = tiles[row]?.[col];
+      if (!t || t === T.AIR || t === T.STONE || t === T.DIRT) continue;
+      if (col * BS > W + BS) continue;
+      drawBlock(col, row, t);
+    }
+  }
+
+  // Static structures
+  treePositions = [Math.floor(worldW*0.12), Math.floor(worldW*0.42), Math.floor(worldW*0.72)];
+  housePositions = [Math.floor(worldW*0.18), Math.floor(worldW*0.55)];
+  for (const tp of treePositions)  drawTree(tp);
+  for (const hp of housePositions) drawHouseBlocks(hp);
+
+  rc = ctx;  // restore
+}
+
 resize();
 
-// ── State machine ──────────────────────────────────────
+// ── State ──────────────────────────────────────────────
 let curState = 'idle';
-// Lerped values
-let dayness   = 1.0;  // 1 = full day, 0 = full night
-let duskness  = 0.0;  // 1 = pure dusk/sunset
-let lerpR = 0, lerpG = 0, lerpB = 0; // lerped RGB of state indicator
+let dayness = 1.0, duskness = 0.0;
+let lerpR = 52, lerpG = 210, lerpB = 88;
 const STATE_COLORS = { busy:[255,48,48], waiting:[255,200,40], idle:[52,210,88] };
-
-function handleState(s) {
-  if (!STATE_COLORS[s] || s === curState) return;
-  curState = s;
-}
-window.addEventListener('message', ({data:d}) => { if (d?.state) handleState(d.state); });
-if (window.self === window.top) {
-  (async function poll() {
-    try { const d = await (await fetch('/api/status')).json(); if (d?.state) handleState(d.state); } catch {}
-    setTimeout(poll, 1000);
-  })();
+function handleState(s) { if (!STATE_COLORS[s] || s===curState) return; curState=s; }
+window.addEventListener('message', ({data:d})=>{ if(d?.state) handleState(d.state); });
+if (window.self===window.top) {
+  (async function poll(){ try{const d=await(await fetch('/api/status')).json();if(d?.state)handleState(d.state);}catch{}setTimeout(poll,1000); })();
 }
 
-// ── Block rendering ───────────────────────────────────
-const BCOLORS = {
-  [T.GRASS]:      { top:'#6BC229', side:'#7A5C38', bot:'#7A5C38' },
-  [T.DIRT]:       { all:'#7A5C38' },
-  [T.STONE]:      { all:'#828282' },
-  [T.COAL]:       { stone:'#828282', ore:'#252525' },
-  [T.IRON]:       { stone:'#828282', ore:'#CEAB8F' },
-  [T.GOLD]:       { stone:'#828282', ore:'#FCEA41' },
-  [T.DIAMOND]:    { stone:'#828282', ore:'#60F0F0' },
-  [T.REDSTONE]:   { stone:'#828282', ore:'#FF1A1A' },
-  [T.GRAVEL]:     { all:'#8A7B6C' },
-  [T.PLANKS]:     { all:'#A07942', grain:'#956D38' },
-  [T.STONE_BRICK]:{ all:'#888888', mortar:'#666666' },
-  [T.GLASS]:      { all:'rgba(160,220,255,0.4)', border:'rgba(200,240,255,0.7)' },
-  [T.LOG]:        { all:'#5C3E1E', ring:'#3D2A0E' },
-  [T.LEAVES]:     { all:'#4E9227' },
-  [T.BEDROCK]:    { all:'#282828' },
-};
+// ── Villager / Zombie styles (variety) ────────────────────────────────────────
+// 5 villager types: robe color, shoulder, hair, belt, hat (null=no hat), nose multiplier
+const VILLAGER_STYLES = [
+  { robe:'#7A7A7A', shldr:'#909090', hair:'#7A5530', belt:'#5A4A28', hat:null,      name:'普通村民' },
+  { robe:'#4A7AB0', shldr:'#5A8AC0', hair:'#4A3020', belt:'#2A4A70', hat:'#8B6040', name:'农民' },
+  { robe:'#B0B0A0', shldr:'#C8C8B8', hair:'#7A7880', belt:'#808078', hat:'#FFFFFF', name:'图书管理员' },
+  { robe:'#8850A0', shldr:'#9860B0', hair:'#282828', belt:'#502870', hat:'#6030A0', name:'牧师' },
+  { robe:'#3A8A2A', shldr:'#4A9A3A', hair:'#8A6040', belt:'#285020', hat:null,      name:'无业游民' },
+];
+// 4 zombie types: skin, body, crown, pupils, name
+const ZOMBIE_STYLES = [
+  { skin:'#5AAA60', body:'#2A7A3A', crown:'#2A5A30', pupils:'#8B0000', name:'普通僵尸' },
+  { skin:'#8A7050', body:'#5A4A30', crown:'#3A2A20', pupils:'#AA4400', name:'烧焦僵尸' },
+  { skin:'#5AAA60', body:'#2A7A3A', crown:'#888888', pupils:'#8B0000', helmet:true,  name:'铁盔僵尸' },
+  { skin:'#4A9A8A', body:'#2A6A5A', crown:'#1A4A40', pupils:'#004488', name:'溺尸' },
+];
 
-function drawBlock(col, row, tileId, glow) {
-  const x = col * BS, y = row * BS;
-  const bc = BCOLORS[tileId];
-  if (!bc) return;
-
-  // Shadow for depth (bottom/right darker)
-  const shadow = 'rgba(0,0,0,0.20)';
-
-  if (tileId === T.GRASS) {
-    ctx.fillStyle = bc.side; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = bc.top;  ctx.fillRect(x, y, BS, Math.max(2, BS * 0.22));
-    // Grass tufts
-    ctx.fillStyle = '#7DC836';
-    for (let i = 0; i < 3; i++) {
-      const tx = x + (i * 3 + 1) * (BS / 10);
-      ctx.fillRect(tx, y, Math.max(1, BS/12), Math.max(1, BS*0.18));
-    }
-  } else if (tileId === T.PLANKS) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = bc.grain;
-    for (let i = 0; i < 3; i++) {
-      ctx.fillRect(x, y + i * (BS/3), BS, Math.max(1, 1));
-    }
-    ctx.fillRect(x + BS/2, y, Math.max(1, 1), BS);
-  } else if (tileId === T.STONE_BRICK) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = bc.mortar;
-    ctx.fillRect(x, y + BS/2, BS, Math.max(1, 1));
-    ctx.fillRect(x + BS/4, y, Math.max(1, 1), BS/2);
-    ctx.fillRect(x + BS*3/4, y + BS/2, Math.max(1, 1), BS/2);
-  } else if (tileId === T.GLASS) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.strokeStyle = bc.border; ctx.lineWidth = Math.max(1, BS/12);
-    ctx.strokeRect(x + BS*0.1, y + BS*0.1, BS*0.8, BS*0.8);
-  } else if (tileId === T.LOG) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = bc.ring;
-    ctx.fillRect(x + BS*0.3, y + BS*0.3, BS*0.4, BS*0.4);
-    ctx.fillRect(x + BS*0.15, y, BS*0.7, Math.max(1, BS*0.1));
-    ctx.fillRect(x + BS*0.15, y + BS*0.9, BS*0.7, Math.max(1, BS*0.1));
-    ctx.fillRect(x, y + BS*0.15, Math.max(1, BS*0.1), BS*0.7);
-    ctx.fillRect(x + BS*0.9, y + BS*0.15, Math.max(1, BS*0.1), BS*0.7);
-  } else if (tileId === T.LEAVES) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.fillRect(x, y + BS*0.75, BS, BS*0.25);
-    ctx.fillRect(x + BS*0.75, y, BS*0.25, BS);
-    // Leaf dapples
-    ctx.fillStyle = '#5BAD30';
-    ctx.fillRect(x + BS*0.1, y + BS*0.1, BS*0.3, BS*0.3);
-    ctx.fillRect(x + BS*0.55, y + BS*0.5, BS*0.3, BS*0.3);
-  } else if (tileId === T.BEDROCK) {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-    ctx.fillStyle = 'rgba(60,60,60,0.5)';
-    ctx.fillRect(x + BS*0.3, y + BS*0.2, BS*0.2, BS*0.2);
-    ctx.fillRect(x + BS*0.1, y + BS*0.6, BS*0.25, BS*0.2);
-    ctx.fillRect(x + BS*0.65, y + BS*0.45, BS*0.2, BS*0.2);
-  } else if (bc.stone) {
-    // Ore block: stone background + ore deposit
-    ctx.fillStyle = bc.stone; ctx.fillRect(x, y, BS, BS);
-    const g = glow || 0;
-    let oreColor = bc.ore;
-    if (tileId === T.REDSTONE && g > 0) {
-      oreColor = `rgba(255,${~~(26+g*80)},${~~(g*30)},${0.8+g*0.2})`;
-    }
-    if (tileId === T.DIAMOND && g > 0) {
-      oreColor = `rgba(${~~(96+g*60)},${~~(240+g*15)},${~~(240+g*15)},1)`;
-    }
-    ctx.fillStyle = oreColor;
-    // Ore deposit shapes
-    ctx.fillRect(x + BS*0.2, y + BS*0.25, BS*0.25, BS*0.2);
-    ctx.fillRect(x + BS*0.55, y + BS*0.5, BS*0.25, BS*0.2);
-    ctx.fillRect(x + BS*0.15, y + BS*0.55, BS*0.2, BS*0.2);
-    ctx.fillRect(x + BS*0.6, y + BS*0.2, BS*0.2, BS*0.2);
-
-    // Glow halo for lit ores
-    if (g > 0.1) {
-      const grd = ctx.createRadialGradient(x+BS/2, y+BS/2, 0, x+BS/2, y+BS/2, BS*1.2);
-      const c = tileId===T.REDSTONE ? `255,60,0` : `96,240,240`;
-      grd.addColorStop(0, `rgba(${c},${g*0.45})`);
-      grd.addColorStop(1, `rgba(${c},0)`);
-      ctx.fillStyle = grd;
-      ctx.fillRect(x - BS*0.2, y - BS*0.2, BS*1.4, BS*1.4);
-    }
-  } else {
-    ctx.fillStyle = bc.all; ctx.fillRect(x, y, BS, BS);
-  }
-  // Subtle edge shadow for depth
-  ctx.fillStyle = shadow;
-  ctx.fillRect(x + BS*0.9, y, BS*0.1, BS);
-  ctx.fillRect(x, y + BS*0.9, BS, BS*0.1);
-}
-
-// ── House drawing ──────────────────────────────────────
-function drawHouse(originCol, ts) {
-  const x0 = originCol * BS;
-  const y0 = SURFACE * BS;
-  // Foundation (1 row, 5 wide)
-  for (let c = 0; c < 5; c++) drawBlock(originCol+c, SURFACE, T.STONE_BRICK);
-  // Walls (2 rows)
-  for (let c = 0; c < 5; c++) drawBlock(originCol+c, SURFACE-1, T.PLANKS);
-  for (let c = 0; c < 5; c++) {
-    // Windows at c=1 and c=3, door at c=2 (just different opacity planks)
-    if (c === 1 || c === 3) drawBlock(originCol+c, SURFACE-1, T.GLASS);
-    else drawBlock(originCol+c, SURFACE-1, T.PLANKS);
-  }
-  // Upper walls
-  for (let c = 0; c < 5; c++) drawBlock(originCol+c, SURFACE-2, T.PLANKS);
-  for (let c = 0; c < 5; c++) {
-    if (c === 1 || c === 3) drawBlock(originCol+c, SURFACE-2, T.GLASS);
-    else drawBlock(originCol+c, SURFACE-2, T.PLANKS);
-  }
-  // Roof (overhanging stone brick)
-  for (let c = -1; c <= 5; c++) drawBlock(originCol+c, SURFACE-3, T.STONE_BRICK);
-  // Roof overhang row
-  for (let c = 0; c < 5; c++) drawBlock(originCol+c, SURFACE-4, T.LOG);
-  drawBlock(originCol, SURFACE-4, T.LOG);
-  drawBlock(originCol+4, SURFACE-4, T.LOG);
-
-  // Torch on left side (animated)
-  drawTorch(x0 - BS*0.3, y0 - BS*2, ts);
-  // Torch on right side
-  drawTorch(x0 + 5*BS - BS*0.6, y0 - BS*2, ts);
-}
-
-function drawTorch(x, y, ts) {
-  const flicker = 0.85 + Math.sin(ts * 17) * 0.08 + Math.sin(ts * 31) * 0.07;
-  // Stick
-  ctx.fillStyle = '#6B4A1E';
-  const stickW = Math.max(2, BS * 0.15);
-  const stickH = Math.max(4, BS * 0.6);
-  ctx.fillRect(x + stickW, y + BS*0.3, stickW, stickH);
-  // Flame glow
-  const grd = ctx.createRadialGradient(x + stickW*1.5, y + BS*0.2, 0, x + stickW*1.5, y + BS*0.3, BS*0.7*flicker);
-  grd.addColorStop(0,   `rgba(255,220,50,${flicker*0.9})`);
-  grd.addColorStop(0.3, `rgba(255,140,20,${flicker*0.7})`);
-  grd.addColorStop(0.7, `rgba(255,60,0,${flicker*0.3})`);
-  grd.addColorStop(1,   'rgba(0,0,0,0)');
-  ctx.fillStyle = grd;
-  ctx.fillRect(x - BS*0.3, y - BS*0.3, BS*1.2, BS);
-  // Flame core
-  ctx.fillStyle = `rgba(255,230,80,${flicker*0.95})`;
-  ctx.fillRect(x + stickW*0.5, y + BS*0.05, stickW*2, stickW*2);
-}
-
-// ── Tree drawing ──────────────────────────────────────
-function drawTree(col) {
-  // Trunk: 2 tall
-  drawBlock(col, SURFACE-1, T.LOG);
-  drawBlock(col, SURFACE-2, T.LOG);
-  drawBlock(col, SURFACE-3, T.LOG);
-  // Leaves: 3×3 centered on trunk top
-  for (let dc = -1; dc <= 1; dc++) {
-    drawBlock(col+dc, SURFACE-3, T.LEAVES);
-    drawBlock(col+dc, SURFACE-4, T.LEAVES);
-    if (dc !== 0) drawBlock(col+dc, SURFACE-5, T.LEAVES);
-  }
-  drawBlock(col, SURFACE-5, T.LEAVES);
-  drawBlock(col, SURFACE-6, T.LEAVES);
-}
-
-// ── Character drawing ─────────────────────────────────
-// P = BS/8 → character is exactly 1 block wide (P*8) × 2 blocks tall (P*16)
-// Walking: front/back leg DEPTH alternation (lighter = front, darker = back)
-// This is the authentic Minecraft 2D walk look — no Y-bobbing legs.
-
-function drawVillager(cx, groundY, walkT, dir) {
+// ── Character drawing ─────────────────────────────────────────────────────────
+function drawVillager(cx, gY, walkT, dir, style) {
   const P  = Math.max(2, Math.round(BS / 8));
-  const bx = Math.round(cx - P * 4);      // left edge of 8P-wide sprite
-  const by = Math.round(groundY - P * 17); // top of head; bottom row = groundY
+  const bx = Math.round(cx - P*4);
+  const by = Math.round(gY - P*17);
+  const st = VILLAGER_STYLES[style % VILLAGER_STYLES.length];
 
   ctx.save();
-  // Mirror sprite when facing left
-  if (dir < 0) { ctx.translate(Math.round(cx) * 2, 0); ctx.scale(-1, 1); }
+  if (dir < 0) { ctx.translate(Math.round(cx)*2, 0); ctx.scale(-1,1); }
 
-  // ── HEAD (6P × 5P, Minecraft square, centred in 8P sprite) ──────────
-  // Hair
-  ctx.fillStyle = '#7A5530';
-  ctx.fillRect(bx + P, by, P * 6, P * 2);          // hair top
-  ctx.fillRect(bx + P, by + P * 2, P, P * 2);      // left sideburn
-  // Skin
-  ctx.fillStyle = '#C8A870';
-  ctx.fillRect(bx + P, by + P * 2, P * 6, P * 3);  // cheeks + forehead
+  // Head (hair + skin)
+  ctx.fillStyle = st.hair;  ctx.fillRect(bx+P, by, P*6, P*2); ctx.fillRect(bx+P, by+P*2, P, P*2);
+  ctx.fillStyle = '#C8A870'; ctx.fillRect(bx+P, by+P*2, P*6, P*3);
+  // Hat (librarian/farmer/cleric get one)
+  if (st.hat) {
+    ctx.fillStyle = st.hat;
+    ctx.fillRect(bx, by-P, P*8, P);       // brim
+    ctx.fillRect(bx+P*2, by-P*3, P*4, P*2); // crown
+  }
   // Eyes
   ctx.fillStyle = '#1A1A1A';
-  ctx.fillRect(bx + P * 2, by + P * 3, P * 2, P);  // left eye
-  ctx.fillRect(bx + P * 5, by + P * 3, P,     P);  // right eye (slightly narrower = depth)
-  // Villager iconic BIG NOSE — protrudes to the RIGHT (facing side)
-  ctx.fillStyle = '#A07848';
-  ctx.fillRect(bx + P * 6, by + P * 3, P * 2, P * 2); // nose block
-  ctx.fillStyle = '#C09870';
-  ctx.fillRect(bx + P * 7, by + P * 3, P, P);          // nose tip highlight
+  ctx.fillRect(bx+P*2, by+P*3, P*2, P); ctx.fillRect(bx+P*5, by+P*3, P, P);
+  // Big villager nose
+  ctx.fillStyle = '#A07848'; ctx.fillRect(bx+P*6, by+P*3, P*2, P*2);
+  ctx.fillStyle = '#C09870'; ctx.fillRect(bx+P*7, by+P*3, P, P);
   // Mouth
-  ctx.fillStyle = '#7A4A28';
-  ctx.fillRect(bx + P * 3, by + P * 5, P * 2, P);
+  ctx.fillStyle = '#7A4A28'; ctx.fillRect(bx+P*3, by+P*5, P*2, P);
 
-  // ── SHOULDERS (6P wide — Minecraft boxy shoulder row) ──────────────
-  ctx.fillStyle = '#909090';
-  ctx.fillRect(bx + P, by + P * 6, P * 6, P);
+  // Shoulders + body
+  ctx.fillStyle = st.shldr; ctx.fillRect(bx+P, by+P*6, P*6, P);
+  ctx.fillStyle = st.robe;  ctx.fillRect(bx+P*2, by+P*7, P*4, P*5);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(bx+P*2, by+P*7, P, P*5); // lit edge
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';       ctx.fillRect(bx+P*5, by+P*7, P, P*5); // shadow edge
+  ctx.fillStyle = st.belt;  ctx.fillRect(bx+P*2, by+P*11, P*4, P);
 
-  // ── BODY / ROBE (4P wide, lit left / shadowed right) ────────────────
-  ctx.fillStyle = '#7A7A7A';
-  ctx.fillRect(bx + P * 2, by + P * 7, P * 4, P * 5);
-  ctx.fillStyle = '#AAAAAA';
-  ctx.fillRect(bx + P * 2, by + P * 7, P,     P * 5); // left highlight
-  ctx.fillStyle = '#555555';
-  ctx.fillRect(bx + P * 5, by + P * 7, P,     P * 5); // right shadow
-  // Belt
-  ctx.fillStyle = '#5A4A28';
-  ctx.fillRect(bx + P * 2, by + P * 11, P * 4, P);
-
-  // ── ARMS (2P wide — counterswing to legs) ───────────────────────────
-  // Arms swing opposite phase from same-side leg (natural walking motion)
+  // Arms (counterswing)
   const armSwing = Math.sin(walkT) * P * 1.5;
-  ctx.fillStyle = '#8A8A8A';
-  ctx.fillRect(bx + P       - armSwing * 0.5, by + P * 6, P * 2, P * 5); // left arm
-  ctx.fillStyle = '#686868';
-  ctx.fillRect(bx + P * 5   + armSwing * 0.5, by + P * 6, P * 2, P * 5); // right arm (darker)
+  ctx.fillStyle = st.shldr;
+  ctx.fillRect(bx+P       - armSwing*0.5, by+P*6, P*2, P*5);
+  ctx.fillStyle = st.robe;
+  ctx.fillRect(bx+P*5     + armSwing*0.5, by+P*6, P*2, P*5);
 
-  // ── LEGS — front/back depth alternation, slight X stride ────────────
-  // This replaces the old Y-bobbing: front leg lighter, back leg darker.
-  // A subtle X-stride (±0.5P) makes the stride visually clear.
-  const stride   = Math.sin(walkT) * P;
-  const leftFwd  = stride > 0;
-  // Back leg (drawn first so front leg covers it)
-  ctx.fillStyle  = leftFwd ? '#3A2818' : '#6C4A30';
-  ctx.fillRect(bx + P * 4 - stride * 0.5, by + P * 12, P * 2, P * 4);
-  // Front leg
-  ctx.fillStyle  = leftFwd ? '#6C4A30' : '#3A2818';
-  ctx.fillRect(bx + P * 2 + stride * 0.5, by + P * 12, P * 2, P * 4);
-  // Shoes (3P wide, 1P tall — slightly overhang foot for planted look)
-  ctx.fillStyle  = '#2A1A0A';
-  ctx.fillRect(bx + P       + stride * 0.5,  by + P * 16, P * 3, P); // front shoe
-  ctx.fillRect(bx + P * 3   - stride * 0.5,  by + P * 16, P * 3, P); // back shoe
+  // Legs (front/back depth alternation)
+  const stride = Math.sin(walkT) * P;
+  const lf = stride > 0;
+  ctx.fillStyle = lf ? '#3A2818' : '#6C4A30'; ctx.fillRect(bx+P*4 - stride*0.5, by+P*12, P*2, P*4);
+  ctx.fillStyle = lf ? '#6C4A30' : '#3A2818'; ctx.fillRect(bx+P*2 + stride*0.5, by+P*12, P*2, P*4);
+  ctx.fillStyle = '#2A1A0A';
+  ctx.fillRect(bx+P   + stride*0.5, by+P*16, P*3, P);
+  ctx.fillRect(bx+P*3 - stride*0.5, by+P*16, P*3, P);
 
   ctx.restore();
 }
 
-function drawZombie(cx, groundY, walkT, dir) {
+function drawZombie(cx, gY, walkT, dir, style) {
   const P  = Math.max(2, Math.round(BS / 8));
-  const bx = Math.round(cx - P * 4);
-  const by = Math.round(groundY - P * 17);
+  const bx = Math.round(cx - P*4);
+  const by = Math.round(gY - P*17);
+  const st = ZOMBIE_STYLES[style % ZOMBIE_STYLES.length];
 
   ctx.save();
-  // Zombies default walk LEFT; flip sprite when dir > 0
-  if (dir > 0) { ctx.translate(Math.round(cx) * 2, 0); ctx.scale(-1, 1); }
+  if (dir > 0) { ctx.translate(Math.round(cx)*2, 0); ctx.scale(-1,1); }
 
-  // ── HEAD (same dimensions as villager, zombie-green) ────────────────
-  ctx.fillStyle = '#5AAA60';
-  ctx.fillRect(bx + P, by, P * 6, P * 5);
-  // Dark crown (rotting hair)
-  ctx.fillStyle = '#2A5A30';
-  ctx.fillRect(bx + P, by, P * 6, P);
-  ctx.fillRect(bx + P, by + P, P, P * 2);
-  // Dead hollow eyes (dark green + red pupils)
-  ctx.fillStyle = '#1A3A1A';
-  ctx.fillRect(bx + P * 2, by + P * 2, P * 2, P * 2);
-  ctx.fillRect(bx + P * 5, by + P * 2, P * 2, P * 2);
-  ctx.fillStyle = '#8B0000'; // glowing red pupils
-  ctx.fillRect(bx + P * 2, by + P * 2, P, P);
-  ctx.fillRect(bx + P * 5, by + P * 2, P, P);
-  // Open groaning mouth
-  ctx.fillStyle = '#1A1A1A';
-  ctx.fillRect(bx + P * 3, by + P * 4, P * 2, P);
-  ctx.fillStyle = '#5A0000';
-  ctx.fillRect(bx + P * 3, by + P * 4, P, P); // inside mouth
+  // Head
+  ctx.fillStyle = st.skin;  ctx.fillRect(bx+P, by, P*6, P*5);
+  ctx.fillStyle = st.crown; ctx.fillRect(bx+P, by, P*6, P); ctx.fillRect(bx+P, by+P, P, P*2);
+  // Helmet if armored
+  if (st.helmet) {
+    ctx.fillStyle = '#9A9A9A'; ctx.fillRect(bx, by-P, P*8, P*2);
+    ctx.fillStyle = '#888888'; ctx.fillRect(bx+P, by+P, P*6, P*3);
+  }
+  // Eyes
+  ctx.fillStyle = '#1A3A1A'; ctx.fillRect(bx+P*2,by+P*2,P*2,P*2); ctx.fillRect(bx+P*5,by+P*2,P*2,P*2);
+  ctx.fillStyle = st.pupils; ctx.fillRect(bx+P*2,by+P*2,P,P);     ctx.fillRect(bx+P*5,by+P*2,P,P);
+  // Open mouth
+  ctx.fillStyle = '#1A1A1A'; ctx.fillRect(bx+P*3,by+P*4,P*2,P);
+  ctx.fillStyle = '#5A0000'; ctx.fillRect(bx+P*3,by+P*4,P,P);
 
-  // ── BODY (dark ragged shirt) ─────────────────────────────────────────
-  ctx.fillStyle = '#2A7A3A';
-  ctx.fillRect(bx + P * 2, by + P * 5, P * 4, P * 6);
-  ctx.fillStyle = '#3A9A4A';
-  ctx.fillRect(bx + P * 2, by + P * 5, P, P * 6);  // left lit edge
-  ctx.fillStyle = '#1A5A2A';
-  ctx.fillRect(bx + P * 5, by + P * 5, P, P * 6);  // right shadow
-  // Rips/tears texture
-  ctx.fillStyle = '#1A2A1A';
-  ctx.fillRect(bx + P * 3, by + P * 7, P * 2, P);
-  ctx.fillRect(bx + P * 4, by + P * 9, P,     P * 2);
+  // Body
+  ctx.fillStyle = st.body;  ctx.fillRect(bx+P*2,by+P*5,P*4,P*6);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(bx+P*2,by+P*5,P,P*6);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';        ctx.fillRect(bx+P*5,by+P*5,P,P*6);
+  // Rips
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(bx+P*3,by+P*7,P*2,P); ctx.fillRect(bx+P*4,by+P*9,P,P*2);
 
-  // ── ARMS — BOTH EXTENDED FORWARD (zombie pose) ──────────────────────
-  // In pre-flip space "forward" = RIGHT. Both arms horizontal, one above the other.
-  // Small rhythmic bob so they feel alive (not totally frozen).
-  const armBob = Math.sin(walkT * 0.8) * P * 0.4;
-  // Upper arm
-  ctx.fillStyle = '#5AAA60'; // green skin
-  ctx.fillRect(bx + P * 6,      by + P * 5 + armBob, P * 4, P * 2);
-  ctx.fillStyle = '#3A8040'; // slightly darker hand
-  ctx.fillRect(bx + P * 9,      by + P * 5 + armBob, P * 2, P * 2); // hand
-  // Lower arm (slightly below, opposite bob phase)
-  ctx.fillStyle = '#4A9A50';
-  ctx.fillRect(bx + P * 6,      by + P * 8 - armBob, P * 4, P * 2);
-  ctx.fillStyle = '#2A7030';
-  ctx.fillRect(bx + P * 9,      by + P * 8 - armBob, P * 2, P * 2); // hand
+  // Both arms outstretched FORWARD (right = forward in pre-flip space)
+  const bob = Math.sin(walkT*0.8) * P * 0.4;
+  ctx.fillStyle = st.skin;
+  ctx.fillRect(bx+P*6, by+P*5+bob, P*4, P*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(bx+P*9, by+P*5+bob, P*2, P*2); // hand shadow
+  ctx.fillStyle = st.skin;
+  ctx.fillRect(bx+P*6, by+P*8-bob, P*4, P*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(bx+P*9, by+P*8-bob, P*2, P*2);
 
-  // ── LEGS — slow zombie shuffle (same depth-alternation technique) ────
-  const stride  = Math.sin(walkT * 1.1) * P * 0.7; // slower & narrower than villager
-  const leftFwd = stride > 0;
-  // Back leg
-  ctx.fillStyle = leftFwd ? '#1A3A2A' : '#3A6A4A';
-  ctx.fillRect(bx + P * 4 - stride * 0.4, by + P * 11, P * 2, P * 5);
-  // Front leg
-  ctx.fillStyle = leftFwd ? '#3A6A4A' : '#1A3A2A';
-  ctx.fillRect(bx + P * 2 + stride * 0.4, by + P * 11, P * 2, P * 5);
-  // Worn shoes
+  // Legs (slow shuffle)
+  const stride = Math.sin(walkT*1.1) * P * 0.7;
+  const lf = stride > 0;
+  ctx.fillStyle = lf ? '#1A3A2A' : '#3A6A4A'; ctx.fillRect(bx+P*4-stride*0.4,by+P*11,P*2,P*5);
+  ctx.fillStyle = lf ? '#3A6A4A' : '#1A3A2A'; ctx.fillRect(bx+P*2+stride*0.4,by+P*11,P*2,P*5);
   ctx.fillStyle = '#1A1A0A';
-  ctx.fillRect(bx + P       + stride * 0.4, by + P * 16, P * 3, P);
-  ctx.fillRect(bx + P * 3   - stride * 0.4, by + P * 16, P * 3, P);
+  ctx.fillRect(bx+P   +stride*0.4, by+P*16, P*3, P);
+  ctx.fillRect(bx+P*3 -stride*0.4, by+P*16, P*3, P);
 
   ctx.restore();
+}
+
+// ── Torch draw (no gradient — fast layered fillRect) ─────────────────────────
+function drawTorch(x, y, ts) {
+  const f = 0.85 + Math.sin(ts*17)*0.08 + Math.sin(ts*31)*0.07;  // flicker 0..1
+  const sw = Math.max(2, BS*0.15);
+  ctx.fillStyle = '#6B4A1E'; ctx.fillRect(x+sw, y+BS*0.3, sw, BS*0.55);
+  // Glow: three concentric rects, decreasing alpha (no gradient object!)
+  ctx.globalAlpha = f*0.22; ctx.fillStyle = '#FF6000';
+  ctx.fillRect(x-sw*1.5, y-BS*0.35, sw*6, BS*0.9);
+  ctx.globalAlpha = f*0.45; ctx.fillStyle = '#FFA020';
+  ctx.fillRect(x-sw*0.5, y-BS*0.15, sw*4, BS*0.6);
+  ctx.globalAlpha = f*0.90; ctx.fillStyle = '#FFE060';
+  ctx.fillRect(x+sw*0.5, y+BS*0.02, sw*2, sw*2);
+  ctx.globalAlpha = 1;
 }
 
 // ── Character manager ──────────────────────────────────
-const villagers = [];
-const zombies   = [];
+const villagers = [], zombies = [];
 
 function spawnVillager(x) {
-  return { x, dir: Math.random() < 0.5 ? 1 : -1,
-           speed: 0.4 + Math.random() * 0.3, // blocks/s
-           walkPhase: Math.random() * Math.PI * 2,
-           pauseTimer: 0 };
+  return {
+    x, dir: Math.random()<0.5?1:-1,
+    speed: 0.35 + Math.random()*0.35,
+    walkPhase: Math.random()*Math.PI*2,
+    pauseTimer: 0,
+    style: Math.floor(Math.random()*VILLAGER_STYLES.length),
+  };
 }
 function spawnZombie(x) {
-  return { x, dir: -1, speed: 0.55 + Math.random() * 0.25,
-           walkPhase: Math.random() * Math.PI * 2 };
+  return {
+    x, dir: -1,
+    speed: 0.4 + Math.random()*0.5,   // wider speed range → fast/slow zombies
+    walkPhase: Math.random()*Math.PI*2,
+    style: Math.floor(Math.random()*ZOMBIE_STYLES.length),
+  };
 }
 
-// Initialise on first build
 function initCharacters() {
-  villagers.length = 0;
-  zombies.length   = 0;
-  villagers.push(spawnVillager(W * 0.2));
-  villagers.push(spawnVillager(W * 0.55));
-  villagers.push(spawnVillager(W * 0.78));
-  zombies.push(spawnZombie(W * 1.05));
-  zombies.push(spawnZombie(W * 1.2));
-  zombies.push(spawnZombie(W * 1.35));
+  villagers.length = 0; zombies.length = 0;
+  villagers.push(spawnVillager(W*0.15));
+  villagers.push(spawnVillager(W*0.45));
+  villagers.push(spawnVillager(W*0.72));
+  villagers.push(spawnVillager(W*0.88));  // extra villager
+  zombies.push(spawnZombie(W*1.05));
+  zombies.push(spawnZombie(W*1.22));
+  zombies.push(spawnZombie(W*1.40));
+  zombies.push(spawnZombie(W*1.60));      // extra zombie
 }
 initCharacters();
 
 // ── Clouds ────────────────────────────────────────────
-const clouds = Array.from({length:5}, (_, i) => ({
-  x: W * (i / 5 + 0.1), y: 0.08 + i * 0.035,
-  w: 3 + (i % 3), h: 1 + (i % 2) * 0.5
+const clouds = Array.from({length:5}, (_,i) => ({
+  x: W*(i/5+0.1), y: 0.07+i*0.035, w: 3+(i%3), h: 1+(i%2)*0.5
 }));
+
+// ── Star positions (fixed, computed once) ─────────────
+const STARS = Array.from({length:55}, (_,i)=>({
+  x: ((i*173+37)%997)/997,
+  y: ((i*251+53)%499)/499,
+  ph: i * 1.27,
+}));
+
+// ── Sky color cache (only recreate gradient when sky changes) ──────────────
+let skyGrad = null, lastSkyKey = '';
+function getSkyGrad(top, bot) {
+  const key = `${top}|${bot}`;
+  if (key !== lastSkyKey) {
+    skyGrad = ctx.createLinearGradient(0,0,0,SURFACE*BS);
+    skyGrad.addColorStop(0, `rgb(${top})`);
+    skyGrad.addColorStop(1, `rgb(${bot})`);
+    lastSkyKey = key;
+  }
+  return skyGrad;
+}
 
 // ── Main loop ─────────────────────────────────────────
 let lastTs = 0;
 
 function frame(ts) {
   requestAnimationFrame(frame);
-  const dt  = Math.min((ts - lastTs) / 1000, 0.05);
+  const dt  = Math.min((ts-lastTs)/1000, 0.05);
   lastTs    = ts;
-  const sec = ts / 1000;
+  const sec = ts/1000;
 
-  // ── Lerp environmental values ──────────────────────
-  const targetDay   = curState === 'idle'    ? 1.0 : curState === 'waiting' ? 0.35 : 0.0;
-  const targetDusk  = curState === 'waiting' ? 1.0 : 0.0;
-  dayness  += (targetDay  - dayness)  * Math.min(dt * 1.2, 1);
-  duskness += (targetDusk - duskness) * Math.min(dt * 1.2, 1);
-
-  // Lerp state color
+  // Lerp state values
+  const tDay  = curState==='idle' ? 1.0 : curState==='waiting' ? 0.35 : 0.0;
+  const tDusk = curState==='waiting' ? 1.0 : 0.0;
+  dayness  += (tDay  - dayness)  * Math.min(dt*1.2,1);
+  duskness += (tDusk - duskness) * Math.min(dt*1.2,1);
   const tc = STATE_COLORS[curState];
-  lerpR += (tc[0] - lerpR) * Math.min(dt * 3, 1);
-  lerpG += (tc[1] - lerpG) * Math.min(dt * 3, 1);
-  lerpB += (tc[2] - lerpB) * Math.min(dt * 3, 1);
+  lerpR += (tc[0]-lerpR)*Math.min(dt*3,1);
+  lerpG += (tc[1]-lerpG)*Math.min(dt*3,1);
+  lerpB += (tc[2]-lerpB)*Math.min(dt*3,1);
 
-  // ── Sky ────────────────────────────────────────────
-  const skyTop     = dayness > 0.5
-    ? lerpCol([8,10,22],  [64,108,208], (dayness-0.5)*2)
-    : lerpCol([4,4,18],   [8,10,22],    dayness*2);
-  const skyBot     = dayness > 0.5
-    ? lerpCol([30,50,120],[100,180,255],(dayness-0.5)*2)
-    : lerpCol([10,8,30],  [30,50,120],  dayness*2);
+  // ── Sky ────────────────────────────────────────────────
+  function lC(a,b,t){ return [~~(a[0]+(b[0]-a[0])*t),~~(a[1]+(b[1]-a[1])*t),~~(a[2]+(b[2]-a[2])*t)]; }
+  const d2 = dayness > 0.5;
+  const st = d2 ? lC([8,10,22],[64,108,208],(dayness-0.5)*2)  : lC([4,4,18],[8,10,22],dayness*2);
+  const sb = d2 ? lC([30,50,120],[100,180,255],(dayness-0.5)*2): lC([10,8,30],[30,50,120],dayness*2);
+  const dk = duskness*0.6, db=duskness*0.7;
+  const skyT = [~~(st[0]+(220-st[0])*dk),~~(st[1]+(100-st[1])*dk),~~(st[2]+(30-st[2])*dk)];
+  const skyB = [~~(sb[0]+(255-sb[0])*db),~~(sb[1]+(140-sb[1])*db),~~(sb[2]+(40-sb[2])*db)];
+  ctx.fillStyle = getSkyGrad(`${skyT}`, `${skyB}`);
+  ctx.fillRect(0, 0, W, SURFACE*BS);
 
-  // Dusk orange tint
-  const skyTopFinal  = mixCol(skyTop,  [220,100,30], duskness*0.6);
-  const skyBotFinal  = mixCol(skyBot,  [255,140,40], duskness*0.7);
-
-  const grad = ctx.createLinearGradient(0, 0, 0, SURFACE * BS);
-  grad.addColorStop(0, `rgb(${skyTopFinal})`);
-  grad.addColorStop(1, `rgb(${skyBotFinal})`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  // ── Stars (night) ──────────────────────────────────
+  // ── Stars (single-path batch — no per-star globalAlpha changes) ───────────
   if (dayness < 0.5) {
-    const starBright = 1 - dayness * 2;
-    ctx.fillStyle = `rgba(255,255,255,${starBright * 0.8})`;
-    for (let i = 0; i < 60; i++) {
-      const sx = ((i * 173 + 37) % 997) / 997 * W;
-      const sy = ((i * 251 + 53) % 499) / 499 * (SURFACE * BS * 0.9);
-      const twinkle = 0.5 + Math.sin(sec*2 + i) * 0.5;
-      ctx.globalAlpha = starBright * twinkle * 0.8;
-      ctx.fillRect(sx, sy, Math.max(1, BS*0.06), Math.max(1, BS*0.06));
+    const bright = 1 - dayness*2;
+    ctx.fillStyle = `rgba(255,255,255,${(bright*0.75).toFixed(2)})`;
+    ctx.beginPath();
+    for (const s of STARS) {
+      const tw = 0.5+Math.sin(sec*2+s.ph)*0.5;
+      if (tw * bright < 0.2) continue;
+      const r = Math.max(0.5, BS*0.05);
+      ctx.rect(s.x*W, s.y*SURFACE*BS*0.9, r, r);
     }
-    ctx.globalAlpha = 1;
+    ctx.fill();
   }
 
-  // ── Sun / Moon ─────────────────────────────────────
-  const celestialY  = SURFACE * BS * 0.4;
-  const sunX = W * (0.15 + dayness * 0.7);
-  const moonX = W * (0.85 - dayness * 0.7);
-
-  // Sun (day)
+  // ── Sun / Moon ─────────────────────────────────────────
+  const cY  = SURFACE*BS*0.38;
+  const sunX  = W*(0.15+dayness*0.70);
+  const moonX = W*(0.85-dayness*0.70);
   if (dayness > 0.1) {
-    ctx.globalAlpha = Math.min(1, (dayness - 0.1) / 0.4);
-    ctx.fillStyle = '#FCFF56';
-    const sr = Math.max(4, BS * 0.9);
-    ctx.fillRect(sunX - sr, celestialY - sr, sr*2, sr*2);
-    ctx.fillStyle = '#FFFFA0';
-    ctx.fillRect(sunX - sr*0.6, celestialY - sr*0.6, sr*1.2, sr*1.2);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = Math.min(1,(dayness-0.1)/0.4);
+    const sr = Math.max(4,BS*0.9);
+    ctx.fillStyle='#FCFF56'; ctx.fillRect(sunX-sr, cY-sr, sr*2, sr*2);
+    ctx.fillStyle='#FFFFA0'; ctx.fillRect(sunX-sr*0.6, cY-sr*0.6, sr*1.2, sr*1.2);
+    ctx.globalAlpha=1;
   }
-  // Moon (night)
   if (dayness < 0.7) {
-    ctx.globalAlpha = Math.min(1, (0.7 - dayness) / 0.3) * 0.95;
-    const mr = Math.max(3, BS * 0.7);
-    ctx.fillStyle = '#DDDDFF';
-    ctx.fillRect(moonX - mr, celestialY - mr, mr*2, mr*2);
-    ctx.fillStyle = '#BBBBDD';
-    ctx.fillRect(moonX - mr*0.35, celestialY - mr*0.35, mr*0.7, mr*0.7);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = Math.min(1,(0.7-dayness)/0.3)*0.95;
+    const mr = Math.max(3,BS*0.7);
+    ctx.fillStyle='#DDDDFF'; ctx.fillRect(moonX-mr, cY-mr, mr*2, mr*2);
+    ctx.fillStyle='#BBBBDD'; ctx.fillRect(moonX-mr*0.35, cY-mr*0.35, mr*0.7, mr*0.7);
+    ctx.globalAlpha=1;
   }
 
-  // ── Clouds ─────────────────────────────────────────
-  const cloudAlpha  = 0.6 * dayness + 0.15 * (1-dayness);
-  const cloudColor  = duskness > 0.3 ? `rgba(255,180,120,${cloudAlpha})` : `rgba(255,255,255,${cloudAlpha})`;
-  const cloudSpeed  = curState === 'busy' ? 18 : curState === 'waiting' ? 10 : 6;
-
+  // ── Clouds ─────────────────────────────────────────────
+  const cAlpha = (0.6*dayness+0.15*(1-dayness)).toFixed(2);
+  const cColor = duskness>0.3 ? `rgba(255,180,120,${cAlpha})` : `rgba(255,255,255,${cAlpha})`;
+  const cSpeed = curState==='busy'?18:curState==='waiting'?10:6;
   for (const cl of clouds) {
-    cl.x += cloudSpeed * dt;
-    if (cl.x > W + cl.w * BS * 2) cl.x = -cl.w * BS * 2;
-    ctx.fillStyle = cloudColor;
-    const cx = cl.x, cy = cl.y * SURFACE * BS;
-    const cw = cl.w * BS * 1.8, ch = cl.h * BS * 0.8;
-    ctx.fillRect(cx, cy, cw, ch);
-    ctx.fillRect(cx + cw*0.1, cy - ch*0.4, cw*0.7, ch*0.8);
-    ctx.fillRect(cx + cw*0.5, cy - ch*0.2, cw*0.4, ch*0.7);
+    cl.x += cSpeed*dt;
+    if (cl.x > W+cl.w*BS*2) cl.x = -cl.w*BS*2;
+    ctx.fillStyle = cColor;
+    const cw=cl.w*BS*1.8, ch=cl.h*BS*0.8;
+    ctx.fillRect(cl.x, cl.y*SURFACE*BS, cw, ch);
+    ctx.fillRect(cl.x+cw*0.1, cl.y*SURFACE*BS-ch*0.4, cw*0.7, ch*0.8);
+    ctx.fillRect(cl.x+cw*0.5, cl.y*SURFACE*BS-ch*0.2, cw*0.4, ch*0.7);
   }
 
-  // ── Underground: background ─────────────────────────
-  // Fill underground rows with dark (tiles drawn on top)
-  const underGrad = ctx.createLinearGradient(0, SURFACE*BS, 0, H);
-  underGrad.addColorStop(0, '#1A1008');
-  underGrad.addColorStop(1, '#0A0808');
-  ctx.fillStyle = underGrad;
-  ctx.fillRect(0, SURFACE*BS, W, H - SURFACE*BS);
+  // ── Blit pre-rendered static world (O(1) instead of O(worldW × WORLD_H)) ──
+  ctx.drawImage(worldCanvas, 0, 0);
 
-  // ── World tiles ─────────────────────────────────────
-  const rednessFlash = curState === 'busy' ? 0.55 + Math.sin(sec*4)*0.45 : 0;
-  const diamondGlow  = curState === 'idle' ? 0.4 + Math.sin(sec*2)*0.4 : 0.1;
-
-  for (let row = SURFACE; row < WORLD_H; row++) {
-    for (let col = 0; col < worldW; col++) {
-      const t = tiles[row]?.[col];
-      if (t === undefined || t === T.AIR) continue;
-      // Only draw if on screen
-      if (col * BS > W + BS || (col+1) * BS < 0) continue;
-
-      let glow = 0;
-      if (t === T.REDSTONE) glow = rednessFlash;
-      if (t === T.DIAMOND)  glow = diamondGlow * (0.6 + Math.sin(sec*3 + col)*0.4);
-      if (t === T.GOLD && curState !== 'busy') glow = 0.3 + Math.sin(sec*1.5 + col*0.3)*0.2;
-
-      drawBlock(col, row, t, glow);
+  // ── Dynamic ore glow (fast layered rects, no gradient objects) ───────────
+  const redFlash = curState==='busy' ? 0.45+Math.sin(sec*4)*0.45 : 0;
+  const diaGlow  = curState==='idle' ? 0.35+Math.sin(sec*2)*0.35 : 0.08;
+  if (redFlash > 0 || diaGlow > 0) {
+    for (let row=SURFACE+5; row<WORLD_H-1; row++) {
+      for (let col=0; col<worldW; col++) {
+        const t = tiles[row]?.[col];
+        if (!t) continue;
+        let g = 0, gc = null;
+        if (t===T.REDSTONE && redFlash>0) { g=redFlash; gc='255,60,0'; }
+        if (t===T.DIAMOND  && diaGlow>0)  { g=diaGlow*(0.6+Math.sin(sec*3+col)*0.4); gc='96,240,240'; }
+        if (t===T.GOLD && curState!=='busy') { g=0.25+Math.sin(sec*1.5+col*0.3)*0.2; gc='255,200,40'; }
+        if (g < 0.05 || !gc) continue;
+        const x=col*BS, y=row*BS;
+        ctx.globalAlpha = g*0.28; ctx.fillStyle=`rgb(${gc})`; ctx.fillRect(x-BS,y-BS,BS*3,BS*3);
+        ctx.globalAlpha = g*0.18; ctx.fillRect(x-BS*0.3,y-BS*0.3,BS*1.6,BS*1.6);
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
-  // ── Scene: trees ────────────────────────────────────
-  const treePositions = [
-    Math.floor(worldW * 0.12),
-    Math.floor(worldW * 0.42),
-    Math.floor(worldW * 0.72),
-  ];
-  for (const tp of treePositions) drawTree(tp);
+  // ── Torches (fast, no gradient) ────────────────────────────────────────
+  for (const hp of housePositions) {
+    drawTorch(hp*BS - BS*0.35, SURFACE*BS - BS*2, sec);
+    drawTorch(hp*BS + 5*BS - BS*0.6, SURFACE*BS - BS*2, sec + 1.7); // offset phase
+  }
 
-  // ── Scene: houses ────────────────────────────────────
-  const housePositions = [
-    Math.floor(worldW * 0.18),
-    Math.floor(worldW * 0.55),
-  ];
-  for (const hp of housePositions) drawHouse(hp, sec);
-
-  // ── Ambient overlay: nighttime darkness ─────────────
+  // ── Night darkness overlay ──────────────────────────────────────────────
   if (dayness < 0.95) {
-    ctx.fillStyle = `rgba(0,0,20,${(1 - dayness) * 0.75})`;
+    ctx.fillStyle = `rgba(0,0,20,${((1-dayness)*0.75).toFixed(2)})`;
     ctx.fillRect(0, 0, W, H);
   }
 
-  // ── Update + draw characters ─────────────────────────
-  const groundY = SURFACE * BS; // y of ground surface (top of grass = character feet)
+  // ── Characters ───────────────────────────────────────────────────────────
+  const gY = SURFACE * BS;
 
   if (curState !== 'busy') {
-    // Villagers visible in day/dusk
-    const visibleAlpha = curState === 'idle' ? 1.0 : 0.7;
-    ctx.globalAlpha = visibleAlpha;
+    ctx.globalAlpha = curState==='idle' ? 1.0 : 0.7;
     for (const v of villagers) {
       v.walkPhase += dt * v.speed * Math.PI * 2;
       if (v.pauseTimer > 0) {
         v.pauseTimer -= dt;
       } else {
         v.x += v.dir * v.speed * BS * dt;
-        if (v.x < -BS * 2)       { v.x = W + BS;    v.dir = -1; }
-        if (v.x > W + BS * 2)    { v.x = -BS;       v.dir = 1;  }
-        // Occasionally turn around
-        if (Math.random() < 0.002) { v.dir *= -1; v.pauseTimer = 0.5 + Math.random() * 1.5; }
+        if (v.x < -BS*2)    { v.x = W+BS; v.dir=-1; }
+        if (v.x > W+BS*2)   { v.x = -BS;  v.dir=1; }
+        // Random pause + turn
+        if (Math.random() < 0.002) { v.dir *= -1; v.pauseTimer = 0.6+Math.random()*1.8; }
       }
-      drawVillager(v.x, groundY, v.pauseTimer > 0 ? 0 : v.walkPhase, v.dir);
+      drawVillager(v.x, gY, v.pauseTimer>0 ? 0 : v.walkPhase, v.dir, v.style);
     }
     ctx.globalAlpha = 1;
   }
 
   if (curState === 'busy') {
-    // Zombies at night
     for (const z of zombies) {
       z.walkPhase += dt * z.speed * Math.PI * 1.5;
       z.x += z.dir * z.speed * BS * dt;
-      // Wrap: when off left, respawn off right
-      if (z.x < -BS * 3) z.x = W + BS * 2 + Math.random() * W * 0.3;
-      drawZombie(z.x, groundY, z.walkPhase, z.dir);
+      if (z.x < -BS*3) z.x = W + BS*2 + Math.random()*W*0.4;
+      drawZombie(z.x, gY, z.walkPhase, z.dir, z.style);
     }
   }
 
-  // ── Vignette ─────────────────────────────────────────
-  const vig = ctx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.9);
-  vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(1, `rgba(0,0,0,${0.35 + (1-dayness)*0.25})`);
-  ctx.fillStyle = vig;
-  ctx.fillRect(0, 0, W, H);
+  // ── Vignette (simple corner darkening, no gradient object) ─────────────
+  // Four corner gradients cached as CSS vars in one-time gradient that doesn't change
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(0, H*0.65, W, H*0.35);  // bottom darkening
+  ctx.fillRect(0, 0, W*0.1, H);        // left edge
+  ctx.fillRect(W*0.9, 0, W*0.1, H);    // right edge
 
-  // ── Status badge (Minecraft dirt-style panel) ─────────
-  drawStatusBadge(sec);
+  if (dayness < 0.5) {
+    ctx.fillStyle = `rgba(0,0,0,${((0.5-dayness)*0.5).toFixed(2)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Status badge ─────────────────────────────────────────────────────────
+  drawBadge(sec);
 }
 
-function drawStatusBadge(sec) {
-  const labels = { busy:'FIGHTING!', waiting:'STANDBY', idle:'PEACEFUL' };
-  const icons  = { busy:'🧟', waiting:'🌅', idle:'🌞' };
-  const label  = labels[curState] || 'IDLE';
-  const icon   = icons[curState]  || '🌞';
-
-  const pad = BS * 0.5, fh = Math.max(10, BS * 0.65);
-  ctx.font = `bold ${fh}px 'Courier New', monospace`;
+function drawBadge(sec) {
+  const LABELS = { busy:'FIGHTING!', waiting:'STANDBY', idle:'PEACEFUL' };
+  const ICONS  = { busy:'🧟', waiting:'🌅', idle:'🌞' };
+  const fh = Math.max(10, BS*0.65);
+  const label = LABELS[curState];
+  // Cache font measurement (only remeasure if font size changes)
+  ctx.font = `bold ${fh}px 'Courier New',monospace`;
   const tw = ctx.measureText(label).width;
-  const bw = tw + pad * 4 + fh * 1.2, bh = fh + pad * 1.4;
-  const bx = W - bw - BS, by = BS * 0.6;
+  const pad = BS*0.5, bw = tw+pad*4+fh*1.2, bh = fh+pad*1.4;
+  const bx = W-bw-BS, by = BS*0.6;
 
-  // Stone brick background panel
-  ctx.fillStyle = 'rgba(60,55,50,0.88)';
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.fillStyle = 'rgba(80,75,70,0.7)';
-  ctx.fillRect(bx+2, by+2, bw-4, bh-4);
-  ctx.strokeStyle = `rgb(${~~lerpR},${~~lerpG},${~~lerpB})`;
-  ctx.lineWidth = Math.max(2, BS*0.08);
-  ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle='rgba(60,55,50,0.88)'; ctx.fillRect(bx,by,bw,bh);
+  ctx.fillStyle='rgba(80,75,70,0.7)';  ctx.fillRect(bx+2,by+2,bw-4,bh-4);
+  ctx.strokeStyle=`rgb(${~~lerpR},${~~lerpG},${~~lerpB})`;
+  ctx.lineWidth=Math.max(2,BS*0.08); ctx.strokeRect(bx,by,bw,bh);
 
-  // Blinking dot
-  const blink = curState === 'busy' ? (Math.sin(sec*8)>0?1:0) : 1;
-  const dotR  = Math.max(3, fh * 0.35);
-  ctx.fillStyle = `rgba(${~~lerpR},${~~lerpG},${~~lerpB},${blink})`;
-  ctx.fillRect(bx + pad, by + bh/2 - dotR, dotR*2, dotR*2);
+  const blink = curState==='busy' ? (Math.sin(sec*8)>0?1:0) : 1;
+  const dotR  = Math.max(3,fh*0.35);
+  ctx.fillStyle=`rgba(${~~lerpR},${~~lerpG},${~~lerpB},${blink})`;
+  ctx.fillRect(bx+pad, by+bh/2-dotR, dotR*2, dotR*2);
 
-  // Icon + label
-  ctx.font = `${fh*0.9}px serif`;
-  ctx.fillText(icon, bx + pad*1.5 + dotR, by + bh*0.65);
-  ctx.font = `bold ${fh}px 'Courier New', monospace`;
-  ctx.fillStyle = `rgb(${~~lerpR},${~~lerpG},${~~lerpB})`;
-  ctx.fillText(label, bx + pad*1.5 + dotR + fh*1.1, by + bh*0.68);
+  ctx.font=`${fh*0.9}px serif`; ctx.fillText(ICONS[curState], bx+pad*1.5+dotR, by+bh*0.65);
+  ctx.font=`bold ${fh}px 'Courier New',monospace`;
+  ctx.fillStyle=`rgb(${~~lerpR},${~~lerpG},${~~lerpB})`;
+  ctx.fillText(label, bx+pad*1.5+dotR+fh*1.1, by+bh*0.68);
 }
 
-// ── Color utilities ───────────────────────────────────
-function lerpCol(a, b, t) {
-  return [~~(a[0]+(b[0]-a[0])*t), ~~(a[1]+(b[1]-a[1])*t), ~~(a[2]+(b[2]-a[2])*t)];
-}
-function mixCol(base, mix, t) {
-  return lerpCol(base, mix, Math.min(1, Math.max(0, t)));
-}
-
-// ── Kick off ──────────────────────────────────────────
 handleState('idle');
 requestAnimationFrame(frame);
 </script>
