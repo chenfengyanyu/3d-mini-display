@@ -277,98 +277,151 @@ function drawTree(col) {
 }
 
 // ── Character drawing ─────────────────────────────────
-// All measurements in relative units (1 = BS)
+// P = BS/8 → character is exactly 1 block wide (P*8) × 2 blocks tall (P*16)
+// Walking: front/back leg DEPTH alternation (lighter = front, darker = back)
+// This is the authentic Minecraft 2D walk look — no Y-bobbing legs.
+
 function drawVillager(cx, groundY, walkT, dir) {
-  const P = Math.max(1, Math.floor(BS * 0.11)); // pixel size
-  const x = cx - P*4; // center alignment (sprite is 8P wide)
-  const y = groundY - P*16; // feet at groundY
-  const flip = dir < 0;
+  const P  = Math.max(2, Math.round(BS / 8));
+  const bx = Math.round(cx - P * 4);      // left edge of 8P-wide sprite
+  const by = Math.round(groundY - P * 17); // top of head; bottom row = groundY
 
   ctx.save();
-  if (flip) { ctx.translate(cx*2, 0); ctx.scale(-1, 1); }
+  // Mirror sprite when facing left
+  if (dir < 0) { ctx.translate(Math.round(cx) * 2, 0); ctx.scale(-1, 1); }
 
-  // Head (skin: #C8A46E)
-  ctx.fillStyle = '#C8A46E';
-  ctx.fillRect(x+P*2, y, P*4, P*4);
+  // ── HEAD (6P × 5P, Minecraft square, centred in 8P sprite) ──────────
+  // Hair
+  ctx.fillStyle = '#7A5530';
+  ctx.fillRect(bx + P, by, P * 6, P * 2);          // hair top
+  ctx.fillRect(bx + P, by + P * 2, P, P * 2);      // left sideburn
+  // Skin
+  ctx.fillStyle = '#C8A870';
+  ctx.fillRect(bx + P, by + P * 2, P * 6, P * 3);  // cheeks + forehead
   // Eyes
   ctx.fillStyle = '#1A1A1A';
-  ctx.fillRect(x+P*3, y+P*1, P, P);
-  ctx.fillRect(x+P*5, y+P*1, P, P);
-  // Nose (villager big nose!)
-  ctx.fillStyle = '#A07850';
-  ctx.fillRect(x+P*3, y+P*2, P*2, P*2);
-  // Mouth (tiny smile)
-  ctx.fillStyle = '#8A5030';
-  ctx.fillRect(x+P*3, y+P*3, P, P);
+  ctx.fillRect(bx + P * 2, by + P * 3, P * 2, P);  // left eye
+  ctx.fillRect(bx + P * 5, by + P * 3, P,     P);  // right eye (slightly narrower = depth)
+  // Villager iconic BIG NOSE — protrudes to the RIGHT (facing side)
+  ctx.fillStyle = '#A07848';
+  ctx.fillRect(bx + P * 6, by + P * 3, P * 2, P * 2); // nose block
+  ctx.fillStyle = '#C09870';
+  ctx.fillRect(bx + P * 7, by + P * 3, P, P);          // nose tip highlight
+  // Mouth
+  ctx.fillStyle = '#7A4A28';
+  ctx.fillRect(bx + P * 3, by + P * 5, P * 2, P);
 
-  // Body (gray robe)
+  // ── SHOULDERS (6P wide — Minecraft boxy shoulder row) ──────────────
+  ctx.fillStyle = '#909090';
+  ctx.fillRect(bx + P, by + P * 6, P * 6, P);
+
+  // ── BODY / ROBE (4P wide, lit left / shadowed right) ────────────────
   ctx.fillStyle = '#7A7A7A';
-  ctx.fillRect(x+P*2, y+P*4, P*4, P*6);
-  // Robe trim
-  ctx.fillStyle = '#5A5A5A';
-  ctx.fillRect(x+P*2, y+P*9, P*4, P);
-  // Arms (robe color, sway slightly)
-  const armSway = Math.sin(walkT) * P * 1.2;
-  ctx.fillStyle = '#6A6A6A';
-  ctx.fillRect(x+P, y+P*4+armSway, P, P*5);
-  ctx.fillRect(x+P*6, y+P*4-armSway, P, P*5);
+  ctx.fillRect(bx + P * 2, by + P * 7, P * 4, P * 5);
+  ctx.fillStyle = '#AAAAAA';
+  ctx.fillRect(bx + P * 2, by + P * 7, P,     P * 5); // left highlight
+  ctx.fillStyle = '#555555';
+  ctx.fillRect(bx + P * 5, by + P * 7, P,     P * 5); // right shadow
+  // Belt
+  ctx.fillStyle = '#5A4A28';
+  ctx.fillRect(bx + P * 2, by + P * 11, P * 4, P);
 
-  // Legs (walking)
-  const legAngle = Math.sin(walkT) * P * 2.5;
-  ctx.fillStyle = '#5C3D2E';
-  ctx.fillRect(x+P*2, y+P*10+legAngle, P*2, P*6);
-  ctx.fillRect(x+P*4, y+P*10-legAngle, P*2, P*6);
-  // Feet (brown shoes)
-  ctx.fillStyle = '#3D2810';
-  ctx.fillRect(x+P*2, y+P*15, P*2, P);
-  ctx.fillRect(x+P*4, y+P*15, P*2, P);
+  // ── ARMS (2P wide — counterswing to legs) ───────────────────────────
+  // Arms swing opposite phase from same-side leg (natural walking motion)
+  const armSwing = Math.sin(walkT) * P * 1.5;
+  ctx.fillStyle = '#8A8A8A';
+  ctx.fillRect(bx + P       - armSwing * 0.5, by + P * 6, P * 2, P * 5); // left arm
+  ctx.fillStyle = '#686868';
+  ctx.fillRect(bx + P * 5   + armSwing * 0.5, by + P * 6, P * 2, P * 5); // right arm (darker)
+
+  // ── LEGS — front/back depth alternation, slight X stride ────────────
+  // This replaces the old Y-bobbing: front leg lighter, back leg darker.
+  // A subtle X-stride (±0.5P) makes the stride visually clear.
+  const stride   = Math.sin(walkT) * P;
+  const leftFwd  = stride > 0;
+  // Back leg (drawn first so front leg covers it)
+  ctx.fillStyle  = leftFwd ? '#3A2818' : '#6C4A30';
+  ctx.fillRect(bx + P * 4 - stride * 0.5, by + P * 12, P * 2, P * 4);
+  // Front leg
+  ctx.fillStyle  = leftFwd ? '#6C4A30' : '#3A2818';
+  ctx.fillRect(bx + P * 2 + stride * 0.5, by + P * 12, P * 2, P * 4);
+  // Shoes (3P wide, 1P tall — slightly overhang foot for planted look)
+  ctx.fillStyle  = '#2A1A0A';
+  ctx.fillRect(bx + P       + stride * 0.5,  by + P * 16, P * 3, P); // front shoe
+  ctx.fillRect(bx + P * 3   - stride * 0.5,  by + P * 16, P * 3, P); // back shoe
 
   ctx.restore();
 }
 
 function drawZombie(cx, groundY, walkT, dir) {
-  const P = Math.max(1, Math.floor(BS * 0.11));
-  const x = cx - P*4;
-  const y = groundY - P*16;
-  const flip = dir > 0; // zombies walk left by default
+  const P  = Math.max(2, Math.round(BS / 8));
+  const bx = Math.round(cx - P * 4);
+  const by = Math.round(groundY - P * 17);
 
   ctx.save();
-  if (flip) { ctx.translate(cx*2, 0); ctx.scale(-1, 1); }
+  // Zombies default walk LEFT; flip sprite when dir > 0
+  if (dir > 0) { ctx.translate(Math.round(cx) * 2, 0); ctx.scale(-1, 1); }
 
-  // Head (zombie green)
-  ctx.fillStyle = '#4CAF50';
-  ctx.fillRect(x+P*2, y, P*4, P*4);
-  // Dead eyes (gray/dark)
+  // ── HEAD (same dimensions as villager, zombie-green) ────────────────
+  ctx.fillStyle = '#5AAA60';
+  ctx.fillRect(bx + P, by, P * 6, P * 5);
+  // Dark crown (rotting hair)
+  ctx.fillStyle = '#2A5A30';
+  ctx.fillRect(bx + P, by, P * 6, P);
+  ctx.fillRect(bx + P, by + P, P, P * 2);
+  // Dead hollow eyes (dark green + red pupils)
   ctx.fillStyle = '#1A3A1A';
-  ctx.fillRect(x+P*2, y+P*1, P*2, P);
-  ctx.fillRect(x+P*5, y+P*1, P, P);
-  // Bite marks
-  ctx.fillStyle = '#2D6B2D';
-  ctx.fillRect(x+P*3, y+P*2, P, P);
-  ctx.fillRect(x+P*5, y+P*3, P, P);
+  ctx.fillRect(bx + P * 2, by + P * 2, P * 2, P * 2);
+  ctx.fillRect(bx + P * 5, by + P * 2, P * 2, P * 2);
+  ctx.fillStyle = '#8B0000'; // glowing red pupils
+  ctx.fillRect(bx + P * 2, by + P * 2, P, P);
+  ctx.fillRect(bx + P * 5, by + P * 2, P, P);
+  // Open groaning mouth
+  ctx.fillStyle = '#1A1A1A';
+  ctx.fillRect(bx + P * 3, by + P * 4, P * 2, P);
+  ctx.fillStyle = '#5A0000';
+  ctx.fillRect(bx + P * 3, by + P * 4, P, P); // inside mouth
 
-  // Body (ragged shirt)
-  ctx.fillStyle = '#3A7A4A';
-  ctx.fillRect(x+P*2, y+P*4, P*4, P*6);
-  ctx.fillStyle = '#2A5A3A';
-  ctx.fillRect(x+P*3, y+P*6, P*2, P*2); // rip/tear
-  ctx.fillRect(x+P*2, y+P*8, P, P*2);
-
-  // Arms OUTSTRETCHED forward (zombie style!)
-  const armT = Math.sin(walkT * 0.5) * P * 0.5;
-  ctx.fillStyle = '#4CAF50';
-  // Left arm stretches forward (to the right since zombie faces left = dir=-1)
-  ctx.fillRect(x+P*6, y+P*3+armT, P*4, P); // stretched arm
-  ctx.fillRect(x+P, y+P*4-armT, P, P*5);
-
-  // Legs (shuffling)
-  const legAngle = Math.sin(walkT * 1.3) * P * 1.8;
-  ctx.fillStyle = '#2A4A2A';
-  ctx.fillRect(x+P*2, y+P*10+legAngle, P*2, P*6);
-  ctx.fillRect(x+P*4, y+P*10-legAngle, P*2, P*6);
+  // ── BODY (dark ragged shirt) ─────────────────────────────────────────
+  ctx.fillStyle = '#2A7A3A';
+  ctx.fillRect(bx + P * 2, by + P * 5, P * 4, P * 6);
+  ctx.fillStyle = '#3A9A4A';
+  ctx.fillRect(bx + P * 2, by + P * 5, P, P * 6);  // left lit edge
+  ctx.fillStyle = '#1A5A2A';
+  ctx.fillRect(bx + P * 5, by + P * 5, P, P * 6);  // right shadow
+  // Rips/tears texture
   ctx.fillStyle = '#1A2A1A';
-  ctx.fillRect(x+P*2, y+P*15, P*2, P);
-  ctx.fillRect(x+P*4, y+P*15, P*2, P);
+  ctx.fillRect(bx + P * 3, by + P * 7, P * 2, P);
+  ctx.fillRect(bx + P * 4, by + P * 9, P,     P * 2);
+
+  // ── ARMS — BOTH EXTENDED FORWARD (zombie pose) ──────────────────────
+  // In pre-flip space "forward" = RIGHT. Both arms horizontal, one above the other.
+  // Small rhythmic bob so they feel alive (not totally frozen).
+  const armBob = Math.sin(walkT * 0.8) * P * 0.4;
+  // Upper arm
+  ctx.fillStyle = '#5AAA60'; // green skin
+  ctx.fillRect(bx + P * 6,      by + P * 5 + armBob, P * 4, P * 2);
+  ctx.fillStyle = '#3A8040'; // slightly darker hand
+  ctx.fillRect(bx + P * 9,      by + P * 5 + armBob, P * 2, P * 2); // hand
+  // Lower arm (slightly below, opposite bob phase)
+  ctx.fillStyle = '#4A9A50';
+  ctx.fillRect(bx + P * 6,      by + P * 8 - armBob, P * 4, P * 2);
+  ctx.fillStyle = '#2A7030';
+  ctx.fillRect(bx + P * 9,      by + P * 8 - armBob, P * 2, P * 2); // hand
+
+  // ── LEGS — slow zombie shuffle (same depth-alternation technique) ────
+  const stride  = Math.sin(walkT * 1.1) * P * 0.7; // slower & narrower than villager
+  const leftFwd = stride > 0;
+  // Back leg
+  ctx.fillStyle = leftFwd ? '#1A3A2A' : '#3A6A4A';
+  ctx.fillRect(bx + P * 4 - stride * 0.4, by + P * 11, P * 2, P * 5);
+  // Front leg
+  ctx.fillStyle = leftFwd ? '#3A6A4A' : '#1A3A2A';
+  ctx.fillRect(bx + P * 2 + stride * 0.4, by + P * 11, P * 2, P * 5);
+  // Worn shoes
+  ctx.fillStyle = '#1A1A0A';
+  ctx.fillRect(bx + P       + stride * 0.4, by + P * 16, P * 3, P);
+  ctx.fillRect(bx + P * 3   - stride * 0.4, by + P * 16, P * 3, P);
 
   ctx.restore();
 }
