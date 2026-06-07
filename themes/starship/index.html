@@ -595,8 +595,9 @@ function render(timestamp) {
   lastTimestamp = timestamp;
   t += dt;
 
-  const W = canvas.width;
-  const H = canvas.height;
+  // Use CSS-pixel dimensions so coordinates match ctx.setTransform(dpr) scale
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
 
   // Update animated values
   radarAngle = (radarAngle + dt * 1.4) % (Math.PI * 2);
