@@ -39,7 +39,7 @@ bash start.sh
 bash stop.sh
 ```
 
-### 30 个动画主题
+### 31 个动画主题
 
 | 图标 | 主题 | 视觉效果 |
 |------|------|---------|
@@ -73,6 +73,7 @@ bash stop.sh
 | 🌆 | 赛博城市 | 三层视差城市夜景，暴雨 / 暮色 / 繁星 |
 | 📊 | 工作台 | 真实会话数据：工作计时 + 专注度 + 状态历史 |
 | 🎯 | 像素格斗 | AI 对战：busy=连击，waiting=蓄力，idle=胜利 |
+| ⛏️ | 我的世界 | 方块世界：白天村民散步 / 黄昏归家 / 黑夜僵尸来袭 |
 
 ### 工作原理
 
@@ -128,7 +129,7 @@ MyBetterDisplay/
 │   ├── monitor.js        # HTTP 监控服务（port 4242）
 │   ├── set-state.sh      # Hook 脚本（由 Claude Code 调用）
 │   └── install-hooks.sh  # 向 settings.json 注入 hooks
-└── themes/               # 30 个动画主题（每个独立 HTML 文件）
+└── themes/               # 31 个动画主题（每个独立 HTML 文件）
 ```
 
 ## 系统要求
