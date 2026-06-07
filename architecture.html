@@ -41,7 +41,7 @@
       padding: 1.5rem;
       overflow-x: auto;
     }
-    svg { width: 100%; min-width: 960px; display: block; }
+    svg { width: 100%; min-width: 1060px; display: block; }
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -98,27 +98,25 @@
           <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
         </div>
       </div>
-      <p class="subtitle">Claude Code 实时状态可视化系统 · macOS 虚拟屏管理工具</p>
+      <p class="subtitle">Claude Code 实时状态可视化 · macOS 虚拟屏管理 · 22 个动画主题</p>
     </div>
 
     <div class="diagram-container">
-      <svg viewBox="0 0 1060 720">
+      <!--
+        Layout: strict left-to-right pipeline, all arrows flow right or down only.
+        Columns (x):  A=20-235  B=260-440  C=465-755  D=780-950  E=970-1100(legend)
+        Rows    (y):  0=16-85   1=100-355  2=375-475  3=500-605  4=630-700  5=725-800
+      -->
+      <svg viewBox="0 0 1120 820">
         <defs>
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
-          </marker>
-          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/>
-          </marker>
-          <marker id="arrowhead-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399"/>
-          </marker>
-          <marker id="arrowhead-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/>
-          </marker>
-          <marker id="arrowhead-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
-          </marker>
+          <!-- Arrow markers -->
+          <marker id="arr"        markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#64748b"/></marker>
+          <marker id="arr-cyan"   markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#22d3ee"/></marker>
+          <marker id="arr-emerald"markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#34d399"/></marker>
+          <marker id="arr-amber"  markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#fbbf24"/></marker>
+          <marker id="arr-rose"   markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#fb7185"/></marker>
+          <marker id="arr-violet" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#a78bfa"/></marker>
+          <!-- Grid pattern -->
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
           </pattern>
@@ -127,224 +125,280 @@
         <!-- Background -->
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
-        <!-- ── ARROWS ── -->
+        <!-- ═══════════════════════════════════════════════════════
+             ARROWS — drawn first so they render behind components
+             ═══════════════════════════════════════════════════════ -->
 
-        <!-- Hooks → set-state.sh (dashed rose) -->
-        <path d="M 160 115 L 280 115" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead-rose)" fill="none"/>
-        <text x="220" y="108" fill="#fb7185" font-size="8" text-anchor="middle">hooks</text>
-        <path d="M 160 135 L 280 153" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead-rose)" fill="none"/>
-        <path d="M 160 145 L 280 183" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead-rose)" fill="none"/>
+        <!-- ── [A] Hooks → set-state.sh (three converging horizontals) ── -->
+        <!-- UserPromptSubmit hook right-center → set-state.sh left -->
+        <line x1="92"  y1="212" x2="260" y2="192" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-rose)"/>
+        <!-- PreToolUse hook right-center → set-state.sh left -->
+        <line x1="162" y1="212" x2="260" y2="205" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-rose)"/>
+        <!-- Stop hook right-center → set-state.sh left -->
+        <line x1="225" y1="212" x2="260" y2="218" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-rose)"/>
+        <!-- hooks label -->
+        <text x="172" y="193" fill="#fb7185" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">hook events</text>
 
-        <!-- set-state.sh → monitor.js  POST /api/state (solid amber) -->
-        <path d="M 430 125 Q 530 125 610 365" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead-amber)" fill="none"/>
-        <text x="545" y="230" fill="#fbbf24" font-size="8" text-anchor="middle">POST /api/state</text>
-        <text x="545" y="242" fill="#94a3b8" font-size="7" text-anchor="middle">curl · fire-and-forget</text>
+        <!-- ── [B] set-state.sh → monitor.js (POST /api/state, horizontal) ── -->
+        <line x1="440" y1="205" x2="465" y2="205" stroke="#fbbf24" stroke-width="2" marker-end="url(#arr-amber)"/>
+        <text x="452" y="198" fill="#fbbf24" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">POST</text>
 
-        <!-- install-hooks.sh → settings.json (dashed slate) -->
-        <line x1="85" y1="298" x2="300" y2="78" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrowhead)"/>
-        <text x="165" y="175" fill="#94a3b8" font-size="7.5" text-anchor="middle">inject hooks</text>
+        <!-- ── [C] start.sh → monitor.js (vertical drop) ── -->
+        <line x1="590" y1="82" x2="590" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="604" y="94" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace">manages</text>
 
-        <!-- start.sh → monitor.js -->
-        <line x1="85" y1="298" x2="85" y2="340" stroke="#94a3b8" stroke-width="1.5"/>
-        <line x1="85" y1="340" x2="680" y2="340" stroke="#94a3b8" stroke-width="1.5"/>
-        <line x1="680" y1="340" x2="680" y2="363" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="380" y="333" fill="#94a3b8" font-size="8" text-anchor="middle">starts / manages</text>
+        <!-- ── [D] start.sh → settings.json (horizontal right in Row 0) ── -->
+        <line x1="665" y1="50" x2="780" y2="50" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+        <text x="722" y="43" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">inject hooks</text>
 
-        <!-- monitor.js → /api/status serve -->
-        <line x1="730" y1="465" x2="730" y2="425" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead-emerald)"/>
-        <text x="752" y="448" fill="#94a3b8" font-size="8">serve</text>
+        <!-- ── [E] settings.json → Claude Code (route along top + left edge) ── -->
+        <!-- Goes: settings.json left → along top-edge y=8 → down left edge → Claude Code top-left -->
+        <path d="M 780,50 L 10,50 L 10,135 L 20,135" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)" fill="none"/>
+        <text x="66" y="43" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">activates hooks</text>
 
-        <!-- Frontend polls /api/status -->
-        <path d="M 730 390 Q 730 355 680 355 Q 590 355 590 390" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)" fill="none"/>
-        <text x="668" y="348" fill="#22d3ee" font-size="8" text-anchor="middle">GET /api/status · 250ms</text>
+        <!-- ── [F] monitor.js → index.html (L-shape: down then left) ── -->
+        <path d="M 610,356 L 610,362 L 430,362 L 430,375" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-emerald)" fill="none"/>
+        <text x="518" y="357" fill="#34d399" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">静态文件服务</text>
 
-        <!-- index.html → theme iframe postMessage -->
-        <line x1="480" y1="465" x2="390" y2="465" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
-        <text x="435" y="458" fill="#94a3b8" font-size="8" text-anchor="middle">postMessage</text>
+        <!-- ── [G] index.html → monitor.js polling (route: right edge, up to monitor) ── -->
+        <!-- Goes: index.html right → right to x=762 gap → up to monitor.js right side -->
+        <path d="M 543,424 L 762,424 L 762,228 L 755,228" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arr-cyan)" fill="none"/>
+        <text x="780" y="335" fill="#22d3ee" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="start">GET /api/status</text>
+        <text x="780" y="346" fill="#22d3ee" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="start">250ms poll</text>
 
-        <!-- Theme iframe renders -->
-        <line x1="240" y1="498" x2="240" y2="555" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
-        <text x="262" y="530" fill="#94a3b8" font-size="8">render</text>
+        <!-- ── [H] index.html → Theme iframe (vertical) ── -->
+        <line x1="430" y1="473" x2="430" y2="500" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arr-cyan)"/>
+        <text x="450" y="490" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace">postMessage</text>
 
-        <!-- install.sh → BetterDisplay -->
-        <line x1="180" y1="635" x2="350" y2="635" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="265" y="628" fill="#94a3b8" font-size="8" text-anchor="middle">brew install</text>
+        <!-- ── [I] BetterDisplay section arrows (all horizontal) ── -->
+        <line x1="185" y1="660" x2="230" y2="660" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+        <text x="207" y="653" fill="#94a3b8" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">install</text>
+        <line x1="385" y1="660" x2="430" y2="660" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+        <text x="407" y="653" fill="#94a3b8" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">creates</text>
 
-        <!-- BetterDisplay → Virtual Screen -->
-        <line x1="490" y1="635" x2="620" y2="635" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <text x="555" y="628" fill="#94a3b8" font-size="8" text-anchor="middle">creates</text>
+        <!-- State machine internal arrows -->
+        <line x1="857" y1="170" x2="857" y2="182" stroke="#94a3b8" stroke-width="1" marker-end="url(#arr)"/>
+        <line x1="857" y1="237" x2="857" y2="248" stroke="#94a3b8" stroke-width="1" marker-end="url(#arr)"/>
+        <text x="869" y="180" fill="#94a3b8" font-size="7" font-family="JetBrains Mono,monospace">Stop</text>
+        <text x="869" y="246" fill="#94a3b8" font-size="7" font-family="JetBrains Mono,monospace">3s</text>
+        <!-- PreToolUse back-arrow: WAITING → BUSY (left side loop) -->
+        <path d="M 780,218 Q 762,218 762,145 Q 762,118 780,118" stroke="#fb7185" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr-rose)" fill="none"/>
+        <text x="735" y="172" fill="#fb7185" font-size="6.5" font-family="JetBrains Mono,monospace" transform="rotate(-90,735,172)">PreToolUse</text>
 
-        <!-- ── LAYER 1: Claude Code CLI ── -->
-        <rect x="20" y="58" width="200" height="122" rx="12" fill="rgba(8,51,68,0.15)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="6,3"/>
-        <text x="120" y="50" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Claude Code CLI</text>
 
-        <rect x="30" y="68" width="180" height="40" rx="6" fill="#0f172a"/>
-        <rect x="30" y="68" width="180" height="40" rx="6" fill="rgba(8,51,68,0.5)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="120" y="86" fill="white" font-size="11" font-weight="600" text-anchor="middle">Claude Code</text>
-        <text x="120" y="101" fill="#94a3b8" font-size="9" text-anchor="middle">CLI Process</text>
+        <!-- ═══════════════════════════════════════════════════
+             ROW 0 — Setup tools  (y = 16 … 85)
+             ═══════════════════════════════════════════════════ -->
 
-        <rect x="30" y="118" width="55" height="48" rx="5" fill="#0f172a"/>
-        <rect x="30" y="118" width="55" height="48" rx="5" fill="rgba(136,19,55,0.35)" stroke="#fb7185" stroke-width="1"/>
-        <text x="57" y="136" fill="#fb7185" font-size="8" font-weight="600" text-anchor="middle">UserPrompt</text>
-        <text x="57" y="148" fill="#fb7185" font-size="8" text-anchor="middle">Submit</text>
-        <text x="57" y="160" fill="#94a3b8" font-size="7" text-anchor="middle">Hook</text>
+        <!-- start.sh -->
+        <rect x="465" y="16" width="200" height="66" rx="6" fill="#0f172a"/>
+        <rect x="465" y="16" width="200" height="66" rx="6" fill="rgba(120,53,15,0.4)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="565" y="36" fill="white" font-size="11" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">start.sh</text>
+        <text x="565" y="51" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">检查依赖 · 注入 hooks</text>
+        <text x="565" y="65" fill="#fbbf24" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">bash start.sh  ·  one-shot 启动</text>
 
-        <rect x="92" y="118" width="55" height="48" rx="5" fill="#0f172a"/>
-        <rect x="92" y="118" width="55" height="48" rx="5" fill="rgba(136,19,55,0.35)" stroke="#fb7185" stroke-width="1"/>
-        <text x="119" y="136" fill="#fb7185" font-size="8" font-weight="600" text-anchor="middle">PreTool</text>
-        <text x="119" y="148" fill="#fb7185" font-size="8" text-anchor="middle">Use</text>
-        <text x="119" y="160" fill="#94a3b8" font-size="7" text-anchor="middle">Hook</text>
+        <!-- settings.json -->
+        <rect x="780" y="16" width="195" height="66" rx="6" fill="#0f172a"/>
+        <rect x="780" y="16" width="195" height="66" rx="6" fill="rgba(30,41,59,0.6)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="877" y="36" fill="#94a3b8" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">~/.claude/settings.json</text>
+        <text x="877" y="51" fill="#475569" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">UserPromptSubmit hook</text>
+        <text x="877" y="65" fill="#475569" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">PreToolUse · Stop hook</text>
 
-        <rect x="154" y="118" width="46" height="48" rx="5" fill="#0f172a"/>
-        <rect x="154" y="118" width="46" height="48" rx="5" fill="rgba(136,19,55,0.35)" stroke="#fb7185" stroke-width="1"/>
-        <text x="177" y="136" fill="#fb7185" font-size="8" font-weight="600" text-anchor="middle">Stop</text>
-        <text x="177" y="148" fill="#fb7185" font-size="8" text-anchor="middle">Hook</text>
-        <text x="177" y="160" fill="#94a3b8" font-size="7" text-anchor="middle">Event</text>
 
-        <!-- ── LAYER 2: Hook Scripts ── -->
-        <rect x="270" y="78" width="170" height="130" rx="12" fill="rgba(6,78,59,0.1)" stroke="#34d399" stroke-width="1" stroke-dasharray="6,3"/>
-        <text x="355" y="70" fill="#34d399" font-size="9" font-weight="600" text-anchor="middle">claude-status/ 脚本</text>
+        <!-- ═══════════════════════════════════════════════════
+             ROW 1 — Runtime main flow  (y = 100 … 358)
+             ═══════════════════════════════════════════════════ -->
 
-        <rect x="280" y="88" width="150" height="55" rx="6" fill="#0f172a"/>
-        <rect x="280" y="88" width="150" height="55" rx="6" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="355" y="108" fill="white" font-size="11" font-weight="600" text-anchor="middle">set-state.sh</text>
-        <text x="355" y="123" fill="#94a3b8" font-size="8" text-anchor="middle">解析 Hook JSON</text>
-        <text x="355" y="136" fill="#34d399" font-size="7" text-anchor="middle">curl POST → monitor.js</text>
+        <!-- Section labels -->
+        <text x="127" y="92"  fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">① TRIGGER</text>
+        <text x="350" y="92"  fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">② HOOK SCRIPT</text>
+        <text x="610" y="92"  fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">③ HTTP SERVER</text>
+        <text x="857" y="92"  fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">④ STATE MACHINE</text>
 
-        <rect x="280" y="153" width="150" height="46" rx="6" fill="#0f172a"/>
-        <rect x="280" y="153" width="150" height="46" rx="6" fill="rgba(6,78,59,0.3)" stroke="#34d399" stroke-width="1"/>
-        <text x="355" y="171" fill="white" font-size="10" font-weight="600" text-anchor="middle">install-hooks.sh</text>
-        <text x="355" y="185" fill="#94a3b8" font-size="8" text-anchor="middle">注入 hooks → settings.json</text>
+        <!-- ── Claude Code CLI boundary ── -->
+        <rect x="20" y="100" width="215" height="248" rx="10" fill="rgba(8,51,68,0.12)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="6,3"/>
 
-        <!-- ── LAYER 3: settings.json (small, top-right) ── -->
-        <rect x="510" y="78" width="180" height="32" rx="6" fill="#0f172a"/>
-        <rect x="510" y="78" width="180" height="32" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1"/>
-        <text x="600" y="93" fill="#94a3b8" font-size="9" font-weight="600" text-anchor="middle">~/.claude/settings.json</text>
-        <text x="600" y="105" fill="#475569" font-size="7" text-anchor="middle">hooks 配置（幂等注入）</text>
+        <!-- Claude Code process box -->
+        <rect x="30" y="110" width="195" height="52" rx="6" fill="#0f172a"/>
+        <rect x="30" y="110" width="195" height="52" rx="6" fill="rgba(8,51,68,0.55)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="127" y="131" fill="white" font-size="11" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">Claude Code CLI</text>
+        <text x="127" y="148" fill="#94a3b8" font-size="8.5" font-family="JetBrains Mono,monospace" text-anchor="middle">macOS 本地进程</text>
 
-        <!-- ── LAYER 4: start.sh ── -->
-        <rect x="20" y="228" width="135" height="72" rx="6" fill="#0f172a"/>
-        <rect x="20" y="228" width="135" height="72" rx="6" fill="rgba(120,53,15,0.35)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="87" y="250" fill="white" font-size="11" font-weight="600" text-anchor="middle">start.sh</text>
-        <text x="87" y="265" fill="#94a3b8" font-size="8" text-anchor="middle">检查依赖 · 注入 hooks</text>
-        <text x="87" y="279" fill="#94a3b8" font-size="8" text-anchor="middle">启动 monitor.js</text>
-        <text x="87" y="293" fill="#fbbf24" font-size="7" text-anchor="middle">http://localhost:4242</text>
+        <!-- Hook 1: UserPromptSubmit -->
+        <rect x="30" y="178" width="62" height="65" rx="5" fill="#0f172a"/>
+        <rect x="30" y="178" width="62" height="65" rx="5" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="61" y="196" fill="#fb7185" font-size="7.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">User</text>
+        <text x="61" y="208" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Prompt</text>
+        <text x="61" y="220" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Submit</text>
+        <text x="61" y="235" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">→ busy</text>
 
-        <!-- ── LAYER 5: monitor.js (center, key component) ── -->
-        <rect x="590" y="363" width="280" height="115" rx="8" fill="#0f172a"/>
-        <rect x="590" y="363" width="280" height="115" rx="8" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="2"/>
-        <text x="730" y="385" fill="white" font-size="13" font-weight="700" text-anchor="middle">monitor.js</text>
-        <text x="730" y="401" fill="#94a3b8" font-size="9" text-anchor="middle">Node.js HTTP Server · :4242 · 内存状态机</text>
+        <!-- Hook 2: PreToolUse -->
+        <rect x="100" y="178" width="62" height="65" rx="5" fill="#0f172a"/>
+        <rect x="100" y="178" width="62" height="65" rx="5" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="131" y="196" fill="#fb7185" font-size="7.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">Pre</text>
+        <text x="131" y="208" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Tool</text>
+        <text x="131" y="220" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Use</text>
+        <text x="131" y="235" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">→ busy</text>
+
+        <!-- Hook 3: Stop -->
+        <rect x="170" y="178" width="55" height="65" rx="5" fill="#0f172a"/>
+        <rect x="170" y="178" width="55" height="65" rx="5" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="197" y="200" fill="#fb7185" font-size="7.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">Stop</text>
+        <text x="197" y="213" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Hook</text>
+        <text x="197" y="235" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">→ waiting</text>
+
+        <!-- AskUserQuestion note inside Claude Code boundary -->
+        <rect x="30" y="258" width="195" height="38" rx="4" fill="rgba(136,19,55,0.15)" stroke="#fb7185" stroke-width="0.5" stroke-dasharray="3,2"/>
+        <text x="127" y="272" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">AskUserQuestion →</text>
+        <text x="127" y="285" fill="#fb7185" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">waiting (persistent · 不倒计时)</text>
+
+        <!-- ── set-state.sh ── -->
+        <rect x="260" y="162" width="180" height="90" rx="6" fill="#0f172a"/>
+        <rect x="260" y="162" width="180" height="90" rx="6" fill="rgba(6,78,59,0.5)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="350" y="183" fill="white" font-size="11" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">set-state.sh</text>
+        <text x="350" y="198" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">解析 Hook JSON stdin</text>
+        <text x="350" y="212" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">检测 AskUserQuestion</text>
+        <text x="350" y="226" fill="#34d399" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">curl POST → :4242/api/state</text>
+        <text x="350" y="239" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">fire-and-forget · -m 2</text>
+
+        <!-- ── monitor.js (large, central) ── -->
+        <rect x="465" y="100" width="290" height="258" rx="8" fill="#0f172a"/>
+        <rect x="465" y="100" width="290" height="258" rx="8" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="2"/>
+        <text x="610" y="123" fill="white" font-size="13" font-weight="700" font-family="JetBrains Mono,monospace" text-anchor="middle">monitor.js</text>
+        <text x="610" y="139" fill="#94a3b8" font-size="8.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Node.js HTTP Server · :4242 · 内存状态机</text>
         <!-- divider -->
-        <line x1="600" y1="408" x2="860" y2="408" stroke="#1e293b" stroke-width="1"/>
-        <text x="660" y="422" fill="#fb7185" font-size="8" font-weight="600">POST /api/state</text>
-        <text x="730" y="422" fill="#94a3b8" font-size="7">← set-state.sh 推送</text>
-        <text x="660" y="436" fill="#22d3ee" font-size="8" font-weight="600">GET  /api/status</text>
-        <text x="730" y="436" fill="#94a3b8" font-size="7">→ 前端轮询</text>
-        <text x="660" y="450" fill="#34d399" font-size="8" font-weight="600">静态文件服务</text>
-        <text x="730" y="450" fill="#94a3b8" font-size="7">index.html / themes/</text>
-        <text x="730" y="468" fill="#fbbf24" font-size="7.5" text-anchor="middle">busy 取消倒计时 · waiting 启动 3s → idle</text>
+        <line x1="475" y1="147" x2="745" y2="147" stroke="#1e293b" stroke-width="1"/>
+        <!-- API endpoints -->
+        <text x="490" y="162" fill="#fb7185"  font-size="8"   font-weight="600" font-family="JetBrains Mono,monospace">POST /api/state</text>
+        <text x="490" y="175" fill="#475569"   font-size="7.5" font-family="JetBrains Mono,monospace">← set-state.sh 推送 · busy / waiting</text>
+        <line x1="475" y1="182" x2="745" y2="182" stroke="#1e293b" stroke-width="0.5"/>
+        <text x="490" y="196" fill="#22d3ee"  font-size="8"   font-weight="600" font-family="JetBrains Mono,monospace">GET  /api/status</text>
+        <text x="490" y="209" fill="#475569"   font-size="7.5" font-family="JetBrains Mono,monospace">→ { state, lastEvent, updatedAt }</text>
+        <line x1="475" y1="216" x2="745" y2="216" stroke="#1e293b" stroke-width="0.5"/>
+        <text x="490" y="230" fill="#34d399"  font-size="8"   font-weight="600" font-family="JetBrains Mono,monospace">静态文件服务</text>
+        <text x="490" y="243" fill="#475569"   font-size="7.5" font-family="JetBrains Mono,monospace">index.html · themes/</text>
+        <!-- state logic -->
+        <line x1="475" y1="250" x2="745" y2="250" stroke="#1e293b" stroke-width="1"/>
+        <text x="610" y="265" fill="#fbbf24" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">busy → 立即取消倒计时</text>
+        <text x="610" y="279" fill="#fbbf24" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">waiting(persistent) → 持续黄灯</text>
+        <text x="610" y="293" fill="#fbbf24" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">waiting → 3s 倒计时 → idle</text>
+        <text x="610" y="307" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">前端零计时器 · 严格跟随服务端</text>
+        <text x="610" y="322" fill="#475569" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle">仅限 localhost · 无网络暴露</text>
+        <text x="610" y="342" fill="#34d399" font-size="7"   font-family="JetBrains Mono,monospace" text-anchor="middle" font-weight="600">port 4242</text>
 
-        <!-- ── LAYER 6: Frontend ── -->
-        <rect x="480" y="425" width="200" height="90" rx="6" fill="#0f172a"/>
-        <rect x="480" y="425" width="200" height="90" rx="6" fill="rgba(8,51,68,0.5)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="580" y="447" fill="white" font-size="12" font-weight="600" text-anchor="middle">index.html</text>
-        <text x="580" y="463" fill="#94a3b8" font-size="9" text-anchor="middle">主界面 · 状态展示</text>
-        <text x="580" y="477" fill="#94a3b8" font-size="8" text-anchor="middle">每 250ms 轮询 /api/status</text>
-        <text x="580" y="490" fill="#94a3b8" font-size="8" text-anchor="middle">← → 方向键切换主题</text>
-        <text x="580" y="506" fill="#22d3ee" font-size="7" text-anchor="middle">postMessage → iframe</text>
+        <!-- ── State Machine (right panel) ── -->
+        <rect x="780" y="100" width="175" height="270" rx="8" fill="rgba(30,41,59,0.2)" stroke="#475569" stroke-width="1" stroke-dasharray="5,3"/>
 
-        <!-- Theme Iframe -->
-        <rect x="118" y="428" width="264" height="135" rx="8" fill="rgba(8,51,68,0.1)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="5,3"/>
-        <text x="250" y="421" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Theme Iframe</text>
+        <!-- BUSY state -->
+        <rect x="790" y="112" width="155" height="52" rx="5" fill="#0f172a"/>
+        <rect x="790" y="112" width="155" height="52" rx="5" fill="rgba(136,19,55,0.55)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="867" y="132" fill="#fb7185" font-size="12" font-weight="700" font-family="JetBrains Mono,monospace" text-anchor="middle">● BUSY</text>
+        <text x="867" y="148" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">UserPromptSubmit / PreToolUse</text>
 
-        <rect x="128" y="438" width="244" height="50" rx="6" fill="#0f172a"/>
-        <rect x="128" y="438" width="244" height="50" rx="6" fill="rgba(8,51,68,0.5)" stroke="#22d3ee" stroke-width="1"/>
-        <text x="250" y="458" fill="white" font-size="10" font-weight="600" text-anchor="middle">themes/&lt;id&gt;/index.html</text>
-        <text x="250" y="473" fill="#94a3b8" font-size="8" text-anchor="middle">独立 Canvas 动画 · 严格跟随服务端状态</text>
+        <!-- WAITING state -->
+        <rect x="790" y="182" width="155" height="52" rx="5" fill="#0f172a"/>
+        <rect x="790" y="182" width="155" height="52" rx="5" fill="rgba(120,53,15,0.55)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="867" y="200" fill="#fbbf24" font-size="12" font-weight="700" font-family="JetBrains Mono,monospace" text-anchor="middle">◐ WAITING</text>
+        <text x="867" y="214" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">Stop · 3s 倒计时</text>
+        <text x="867" y="226" fill="#fb7185" font-size="6.5" font-family="JetBrains Mono,monospace" text-anchor="middle">AskUserQuestion → 持续</text>
 
-        <rect x="128" y="497" width="244" height="57" rx="5" fill="rgba(30,41,59,0.3)" stroke="#334155" stroke-width="1"/>
-        <text x="250" y="512" fill="#94a3b8" font-size="8" text-anchor="middle" font-weight="600">16 个内置主题</text>
-        <text x="250" y="526" fill="#475569" font-size="7" text-anchor="middle">traffic-light · ecg · orb · particles · matrix · lightning</text>
-        <text x="250" y="538" fill="#475569" font-size="7" text-anchor="middle">aurora · radar · ripple · heart · flowfield · waveform</text>
-        <text x="250" y="550" fill="#475569" font-size="7" text-anchor="middle">cube · hourglass · lava · starfield</text>
+        <!-- IDLE state -->
+        <rect x="790" y="248" width="155" height="52" rx="5" fill="#0f172a"/>
+        <rect x="790" y="248" width="155" height="52" rx="5" fill="rgba(6,78,59,0.55)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="867" y="268" fill="#34d399" font-size="12" font-weight="700" font-family="JetBrains Mono,monospace" text-anchor="middle">○ IDLE</text>
+        <text x="867" y="284" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">3s 无新事件 · 等待输入</text>
 
-        <!-- ── LAYER 7: State Machine ── -->
-        <rect x="858" y="363" width="182" height="200" rx="8" fill="rgba(30,41,59,0.2)" stroke="#475569" stroke-width="1" stroke-dasharray="5,3"/>
-        <text x="949" y="356" fill="#94a3b8" font-size="9" font-weight="600" text-anchor="middle">状态机（内存）</text>
+        <!-- Note -->
+        <rect x="790" y="312" width="155" height="32" rx="4" fill="rgba(30,41,59,0.4)" stroke="#334155" stroke-width="0.5"/>
+        <text x="867" y="326" fill="#475569" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">两次输入之间不出现绿灯</text>
+        <text x="867" y="337" fill="#475569" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">绿灯 = Claude 完全停止</text>
 
-        <rect x="868" y="372" width="162" height="42" rx="5" fill="#0f172a"/>
-        <rect x="868" y="372" width="162" height="42" rx="5" fill="rgba(136,19,55,0.5)" stroke="#fb7185" stroke-width="1.5"/>
-        <text x="949" y="390" fill="#fb7185" font-size="11" font-weight="700" text-anchor="middle">● BUSY</text>
-        <text x="949" y="406" fill="#94a3b8" font-size="7.5" text-anchor="middle">UserPromptSubmit / PreToolUse</text>
 
-        <line x1="949" y1="414" x2="949" y2="423" stroke="#94a3b8" stroke-width="1" marker-end="url(#arrowhead)"/>
-        <!-- back arrow: waiting → busy if new PreToolUse -->
-        <path d="M 868 445 Q 842 445 842 393 Q 842 372 868 372" stroke="#fb7185" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arrowhead-rose)" fill="none"/>
-        <text x="828" y="412" fill="#fb7185" font-size="6.5" text-anchor="middle" transform="rotate(-90,828,412)">PreToolUse</text>
+        <!-- ═══════════════════════════════════════════════════
+             ROW 2 — Frontend  (y = 375 … 475)
+             ═══════════════════════════════════════════════════ -->
+        <text x="430" y="368" fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">⑤ FRONTEND</text>
 
-        <rect x="868" y="423" width="162" height="42" rx="5" fill="#0f172a"/>
-        <rect x="868" y="423" width="162" height="42" rx="5" fill="rgba(120,53,15,0.45)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="949" y="441" fill="#fbbf24" font-size="11" font-weight="700" text-anchor="middle">◐ WAITING</text>
-        <text x="949" y="457" fill="#94a3b8" font-size="7.5" text-anchor="middle">Stop · 启动 3s 倒计时</text>
+        <rect x="320" y="375" width="220" height="98" rx="6" fill="#0f172a"/>
+        <rect x="320" y="375" width="220" height="98" rx="6" fill="rgba(8,51,68,0.55)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="430" y="396" fill="white" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">index.html</text>
+        <text x="430" y="412" fill="#94a3b8" font-size="8.5" font-family="JetBrains Mono,monospace" text-anchor="middle">主界面 · 主题切换器</text>
+        <text x="430" y="428" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">每 250ms 轮询 /api/status</text>
+        <text x="430" y="442" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">← → ↑ ↓ 方向键切换主题</text>
+        <text x="430" y="457" fill="#22d3ee" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">postMessage → iframe 主题</text>
 
-        <line x1="949" y1="465" x2="949" y2="474" stroke="#94a3b8" stroke-width="1" marker-end="url(#arrowhead)"/>
-        <text x="960" y="472" fill="#94a3b8" font-size="7">3s</text>
 
-        <rect x="868" y="474" width="162" height="42" rx="5" fill="#0f172a"/>
-        <rect x="868" y="474" width="162" height="42" rx="5" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="949" y="492" fill="#34d399" font-size="11" font-weight="700" text-anchor="middle">○ IDLE</text>
-        <text x="949" y="508" fill="#94a3b8" font-size="7.5" text-anchor="middle">3s 无新事件 · 等待用户</text>
+        <!-- ═══════════════════════════════════════════════════
+             ROW 3 — Theme Engine  (y = 500 … 608)
+             ═══════════════════════════════════════════════════ -->
+        <text x="280" y="494" fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">⑥ THEME ENGINE</text>
 
-        <line x1="949" y1="516" x2="949" y2="525" stroke="#94a3b8" stroke-width="1" marker-end="url(#arrowhead)"/>
+        <!-- Theme iframe boundary -->
+        <rect x="50" y="500" width="470" height="108" rx="8" fill="rgba(8,51,68,0.10)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="5,3"/>
 
-        <rect x="868" y="525" width="162" height="30" rx="4" fill="rgba(30,41,59,0.4)" stroke="#475569" stroke-width="0.5"/>
-        <text x="949" y="543" fill="#475569" font-size="7.5" text-anchor="middle">前端无计时器 · 严格跟随服务端</text>
+        <!-- Theme component box -->
+        <rect x="62" y="510" width="446" height="50" rx="5" fill="#0f172a"/>
+        <rect x="62" y="510" width="446" height="50" rx="5" fill="rgba(8,51,68,0.5)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="285" y="530" fill="white" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">themes/&lt;id&gt;/index.html</text>
+        <text x="285" y="547" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace" text-anchor="middle">独立 Canvas 2D 动画 · requestAnimationFrame · 严格跟随服务端状态</text>
 
-        <!-- ── LAYER 8: BetterDisplay ── -->
-        <rect x="20" y="598" width="160" height="56" rx="6" fill="#0f172a"/>
-        <rect x="20" y="598" width="160" height="56" rx="6" fill="rgba(120,53,15,0.35)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="100" y="620" fill="white" font-size="11" font-weight="600" text-anchor="middle">install.sh</text>
-        <text x="100" y="635" fill="#94a3b8" font-size="8" text-anchor="middle">BetterDisplay 安装器</text>
-        <text x="100" y="648" fill="#fbbf24" font-size="7" text-anchor="middle">brew install --cask</text>
+        <!-- Themes list -->
+        <rect x="62" y="568" width="446" height="34" rx="4" fill="rgba(30,41,59,0.3)" stroke="#334155" stroke-width="0.5"/>
+        <text x="285" y="582" fill="#475569" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">🚦红绿灯 ❤️心电图 🔮呼吸球 ✨粒子漩涡 💻数字雨 ⚡雷电 🌌极光 📡雷达 🌀涟漪 🫀心跳 🌫️烟雾 🎵波形</text>
+        <text x="285" y="595" fill="#475569" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">🧊线框 ⏳沙漏 🫧熔岩 🌠星空 😶表情 🏗️建造 🍉切水果 🔥火焰魂 🧬DNA螺旋 💎棱镜幻彩  · 共 22 款</text>
 
-        <rect x="350" y="598" width="150" height="56" rx="6" fill="#0f172a"/>
-        <rect x="350" y="598" width="150" height="56" rx="6" fill="rgba(120,53,15,0.4)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="425" y="618" fill="white" font-size="11" font-weight="600" text-anchor="middle">BetterDisplay</text>
-        <text x="425" y="633" fill="#94a3b8" font-size="8" text-anchor="middle">.app macOS 应用</text>
-        <text x="425" y="648" fill="#fbbf24" font-size="7" text-anchor="middle">/Applications/</text>
 
-        <rect x="620" y="598" width="180" height="56" rx="6" fill="#0f172a"/>
-        <rect x="620" y="598" width="180" height="56" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="710" y="618" fill="white" font-size="11" font-weight="600" text-anchor="middle">虚拟屏幕</text>
-        <text x="710" y="633" fill="#94a3b8" font-size="8" text-anchor="middle">480×640 非标分辨率</text>
-        <text x="710" y="648" fill="#94a3b8" font-size="7" text-anchor="middle">解决采集卡不支持非标分辨率</text>
+        <!-- ═══════════════════════════════════════════════════
+             ROW 4 — BetterDisplay  (y = 630 … 700)
+             ═══════════════════════════════════════════════════ -->
+        <text x="340" y="624" fill="#475569" font-size="8.5" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">⑦ BETTERDISPLAY  (可选 · 仅用于非标分辨率外接设备)</text>
 
-        <!-- ── LEGEND ── -->
-        <text x="858" y="252" fill="white" font-size="10" font-weight="600">图例</text>
-        <rect x="858" y="262" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
-        <text x="880" y="270" fill="#94a3b8" font-size="8">前端 / UI</text>
-        <rect x="858" y="278" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
-        <text x="880" y="286" fill="#94a3b8" font-size="8">后端 / 脚本</text>
-        <rect x="858" y="294" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
-        <text x="880" y="302" fill="#94a3b8" font-size="8">工具 / 应用</text>
-        <rect x="858" y="310" width="16" height="10" rx="2" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
-        <text x="880" y="318" fill="#94a3b8" font-size="8">Hook 事件</text>
-        <line x1="858" y1="332" x2="874" y2="332" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
-        <text x="880" y="335" fill="#94a3b8" font-size="8">Hook 调用流</text>
-        <line x1="858" y1="348" x2="874" y2="348" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="880" y="351" fill="#94a3b8" font-size="8">HTTP 推送</text>
-        <line x1="858" y1="362" x2="874" y2="362" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="880" y="365" fill="#94a3b8" font-size="8">轮询 / 渲染流</text>
+        <rect x="50" y="632" width="135" height="58" rx="6" fill="#0f172a"/>
+        <rect x="50" y="632" width="135" height="58" rx="6" fill="rgba(120,53,15,0.4)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="117" y="653" fill="white" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">install.sh</text>
+        <text x="117" y="667" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">安装器</text>
+        <text x="117" y="680" fill="#fbbf24" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">brew install --cask</text>
 
-        <!-- ── Section Labels ── -->
-        <text x="20" y="43" fill="#475569" font-size="9" font-weight="600">① TRIGGER</text>
-        <text x="270" y="55" fill="#475569" font-size="9" font-weight="600">② HOOK SCRIPTS</text>
-        <text x="510" y="55" fill="#475569" font-size="9" font-weight="600">③ CONFIG</text>
-        <text x="590" y="350" fill="#475569" font-size="9" font-weight="600">④ HTTP SERVER · STATE MACHINE</text>
-        <text x="480" y="412" fill="#475569" font-size="9" font-weight="600">⑤ FRONTEND</text>
-        <text x="118" y="412" fill="#475569" font-size="9" font-weight="600">⑥ THEME ENGINE (16)</text>
-        <text x="20" y="585" fill="#475569" font-size="9" font-weight="600">⑦ BETTERDISPLAY</text>
+        <rect x="230" y="632" width="155" height="58" rx="6" fill="#0f172a"/>
+        <rect x="230" y="632" width="155" height="58" rx="6" fill="rgba(120,53,15,0.45)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="307" y="653" fill="white" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">BetterDisplay</text>
+        <text x="307" y="667" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">macOS .app</text>
+        <text x="307" y="680" fill="#fbbf24" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">/Applications/</text>
+
+        <rect x="430" y="632" width="195" height="58" rx="6" fill="#0f172a"/>
+        <rect x="430" y="632" width="195" height="58" rx="6" fill="rgba(30,41,59,0.6)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="527" y="653" fill="white" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace" text-anchor="middle">虚拟屏幕</text>
+        <text x="527" y="667" fill="#94a3b8" font-size="7.5" font-family="JetBrains Mono,monospace" text-anchor="middle">480 × 640 非标分辨率</text>
+        <text x="527" y="680" fill="#94a3b8" font-size="7" font-family="JetBrains Mono,monospace" text-anchor="middle">OBS / Parsec 串流显示</text>
+
+
+        <!-- ═══════════════════════════════════════════════════
+             LEGEND  (y = 725 … 810, x = 20 right)
+             Below all boundary boxes
+             ═══════════════════════════════════════════════════ -->
+        <text x="20" y="720" fill="white" font-size="10" font-weight="600" font-family="JetBrains Mono,monospace">图例</text>
+
+        <!-- Row 1 -->
+        <rect x="20"  y="728" width="14" height="9" rx="2" fill="rgba(8,51,68,0.5)"    stroke="#22d3ee" stroke-width="1"/>
+        <text x="40"  y="736" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">前端 / UI</text>
+        <rect x="130" y="728" width="14" height="9" rx="2" fill="rgba(6,78,59,0.5)"    stroke="#34d399" stroke-width="1"/>
+        <text x="150" y="736" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">后端 / 脚本</text>
+        <rect x="260" y="728" width="14" height="9" rx="2" fill="rgba(120,53,15,0.4)"  stroke="#fbbf24" stroke-width="1"/>
+        <text x="280" y="736" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">工具 / 应用</text>
+        <rect x="370" y="728" width="14" height="9" rx="2" fill="rgba(136,19,55,0.4)"  stroke="#fb7185" stroke-width="1"/>
+        <text x="390" y="736" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">Hook 事件</text>
+        <rect x="470" y="728" width="14" height="9" rx="2" fill="rgba(30,41,59,0.6)"   stroke="#94a3b8" stroke-width="1"/>
+        <text x="490" y="736" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">外部配置</text>
+
+        <!-- Row 2 -->
+        <line x1="20"  y1="754" x2="34"  y2="754" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="40"  y="758" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">Hook 调用（dashed rose）</text>
+        <line x1="210" y1="754" x2="224" y2="754" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="230" y="758" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">HTTP 推送（amber）</text>
+        <line x1="370" y1="754" x2="384" y2="754" stroke="#34d399" stroke-width="1.5"/>
+        <text x="390" y="758" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">服务端推送（emerald）</text>
+        <line x1="530" y1="754" x2="544" y2="754" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="550" y="758" fill="#94a3b8" font-size="8" font-family="JetBrains Mono,monospace">前端轮询 / 渲染（cyan）</text>
       </svg>
     </div>
 
@@ -355,11 +409,11 @@
           <h3>核心数据流</h3>
         </div>
         <ul>
-          <li>• Claude Code 触发 Hook 事件</li>
-          <li>• set-state.sh 解析 JSON 后 curl POST 推送</li>
-          <li>• monitor.js 内存状态机接收并更新状态</li>
+          <li>• Claude Code 触发 Hook → set-state.sh 解析 JSON</li>
+          <li>• curl POST /api/state 推送到 monitor.js</li>
+          <li>• monitor.js 内存状态机更新状态</li>
           <li>• index.html 每 250ms 轮询 /api/status</li>
-          <li>• postMessage 驱动 iframe 主题动画</li>
+          <li>• postMessage 驱动 iframe 主题 Canvas 动画</li>
         </ul>
       </div>
 
@@ -369,11 +423,11 @@
           <h3>关键设计决策</h3>
         </div>
         <ul>
-          <li>• HTTP 推送取代文件轮询，状态切换精准无竞态</li>
-          <li>• busy 到来立即取消 3s 倒计时，绝不误触绿灯</li>
-          <li>• 前端零计时器，严格跟随服务端状态</li>
-          <li>• Hooks 幂等注入，重复执行安全</li>
-          <li>• 仅限 localhost，无网络暴露风险</li>
+          <li>• HTTP 推送取代文件轮询，零竞态</li>
+          <li>• AskUserQuestion → 持续黄灯，不自动转绿</li>
+          <li>• busy 到来立即取消 3s 倒计时</li>
+          <li>• 前端零计时器，严格跟随服务端</li>
+          <li>• Hooks 幂等注入，仅限 localhost</li>
         </ul>
       </div>
 
@@ -384,16 +438,16 @@
         </div>
         <ul>
           <li>• Node.js 16+（monitor.js HTTP 服务 + 状态机）</li>
-          <li>• 纯 Canvas + requestAnimationFrame（16 主题）</li>
+          <li>• Canvas 2D + requestAnimationFrame（22 主题）</li>
           <li>• Bash + curl（Hook 执行器）</li>
           <li>• BetterDisplay 可选（480×640 虚拟屏）</li>
-          <li>• macOS 12.0+ 专属工具链</li>
+          <li>• macOS 12.0+  ·  仅需 Node.js，无其他依赖</li>
         </ul>
       </div>
     </div>
 
     <p class="footer">
-      MyBetterDisplay · Claude Code Status Visualizer · macOS Virtual Screen Manager · 2026
+      MyBetterDisplay · Claude Code Status Visualizer · 22 Themes · macOS Virtual Screen Manager · 2026
     </p>
   </div>
 
